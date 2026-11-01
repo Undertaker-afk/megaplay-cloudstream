@@ -63,7 +63,12 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/src
           chmod +x gradlew
-          ./gradlew make makePluginsJson
+          # JitPack sometimes fails to resolve the CloudStream gradle plugin on the first try: retry.
+          for attempt in 1 2 3; do
+            ./gradlew make makePluginsJson && break
+            [ "$attempt" = 3 ] && exit 1
+            echo "gradle failed (attempt $attempt), retrying in 20s"; sleep 20
+          done
           cp **/build/*.cs3 $GITHUB_WORKSPACE/builds
           # Two plugin lists so repo.json can use two CDNs: githack (short cache) and raw.githubusercontent
           sed "s#raw.githubusercontent.com#raw.githack.com#g" build/plugins.json > $GITHUB_WORKSPACE/builds/plugins.json
