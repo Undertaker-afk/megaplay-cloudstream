@@ -371,7 +371,9 @@ class MegaPlayProvider : MainAPI() {
     ): Boolean {
         val parts = data.split("|")
         if (parts.size != 3) return false
-        val (malId, ep, lang0) = parts
+        // CloudStream prefixes episode data with mainUrl ("https://tenrai.net/61990|1|sub").
+        val malId = parts[0].substringAfterLast("/")
+        val (ep, lang0) = parts[1] to parts[2]
         // Fall back to the sub if the dub isn't available on MegaPlay.
         var lang = lang0
         var fileId = findFileId(malId, ep, lang)
