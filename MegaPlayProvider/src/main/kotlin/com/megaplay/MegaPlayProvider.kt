@@ -4,6 +4,9 @@ import android.util.Base64
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.LoadResponse.Companion.addDuration
+import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
+import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import javax.crypto.Cipher
@@ -64,7 +67,12 @@ class MegaPlayProvider : MainAPI() {
     data class Trailer(val url: String? = null)
 
     @JsonIgnoreProperties(ignoreUnknown = true)
+    data class Broadcast(val day: String? = null, val time: String? = null)
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class Anime(
+        val duration: String? = null,
+        val broadcast: Broadcast? = null,
         @JsonProperty("mal_id") val malId: Int? = null,
         val title: String? = null,
         @JsonProperty("title_english") val titleEnglish: String? = null,
@@ -90,6 +98,8 @@ class MegaPlayProvider : MainAPI() {
         @JsonProperty("mal_id") val number: Int? = null,
         val title: String? = null,
         val aired: String? = null,
+        val score: Double? = null,
+        val duration: Int? = null,
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -221,6 +231,24 @@ class MegaPlayProvider : MainAPI() {
             null
         }
 
+        // Next episode time from the weekly JST broadcast slot (airing shows only).
+        fun nextAiringOf(): NextAiring? {
+            if (info.status?.contains("Currently Airing", true) != true) return null
+            val day = info.broadcast?.day?.removeSuffix("s")?.take(3)?.lowercase() ?: return null
+            val time = info.broadcast.time ?: return null
+            val dow = listOf("sun", "mon", "tue", "wed", "thu", "fri", "sat").indexOf(day) + 1
+            if (dow == 0) return null
+            val (h, m) = time.split(":").map { it.toIntOrNull() ?: return null }.let { it[0] to it[1] }
+            val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Asia/Tokyo"))
+            cal.set(java.util.Calendar.HOUR_OF_DAY, h); cal.set(java.util.Calendar.MINUTE, m)
+            cal.set(java.util.Calendar.SECOND, 0); cal.set(java.util.Calendar.MILLISECOND, 0)
+            while (cal.get(java.util.Calendar.DAY_OF_WEEK) != dow ||
+                cal.timeInMillis <= System.currentTimeMillis()) cal.add(java.util.Calendar.DAY_OF_MONTH, 1)
+            val nextEp = (numbered.maxOfOrNull { it.number ?: 0 } ?: 0) + 1
+            if (info.episodes != null && nextEp > info.episodes) return null
+            return NextAiring(nextEp, cal.timeInMillis / 1000)
+        }
+
         fun episodes(lang: String) = numbered.map { e ->
             val n = e.number!!
             newEpisode("$malId|$n|$lang") {
@@ -228,6 +256,9 @@ class MegaPlayProvider : MainAPI() {
                 this.episode = n
                 this.posterUrl = thumbs[n]
                 this.date = airedMs(e.aired)
+                // Tenrai episode scores are out of 5.
+                e.score?.takeIf { it > 0 }?.let { this.score = Score.from10(it * 2) }
+                e.duration?.takeIf { it > 0 }?.let { this.runTime = it / 60 }
             }
         }
 
@@ -243,15 +274,24 @@ class MegaPlayProvider : MainAPI() {
             plot = info.synopsis
             actors = cast
             recommendations = recs
+            nextAiring = nextAiringOf()
+            addMalId(malId)
+            addDuration(info.duration)
             year = info.year
             tags = info.genres?.mapNotNull { it.name }
             score = Score.from10(info.score)
             showStatus =
                 if (info.status?.contains("Currently Airing", true) == true) ShowStatus.Ongoing
                 else ShowStatus.Completed
-            // Sub/Dub switch in the CloudStream UI.
-            addEpisodes(DubStatus.Subbed, episodes("sub"))
-            addEpisodes(DubStatus.Dubbed, episodes("dub"))
+            addTrailer(info.trailer?.url)
+            // Sub/Dub switch in the CloudStream UI; the preferred language is listed first.
+            if (MegaPlayPlugin.preferDub()) {
+                addEpisodes(DubStatus.Dubbed, episodes("dub"))
+                addEpisodes(DubStatus.Subbed, episodes("sub"))
+            } else {
+                addEpisodes(DubStatus.Subbed, episodes("sub"))
+                addEpisodes(DubStatus.Dubbed, episodes("dub"))
+            }
         }
     }
 
@@ -283,8 +323,15 @@ class MegaPlayProvider : MainAPI() {
     ): Boolean {
         val parts = data.split("|")
         if (parts.size != 3) return false
-        val (malId, ep, lang) = parts
-        val fileId = findFileId(malId, ep, lang) ?: return false
+        val (malId, ep, lang0) = parts
+        // Fall back to the sub if the dub isn't available on MegaPlay.
+        var lang = lang0
+        var fileId = findFileId(malId, ep, lang)
+        if (fileId == null && lang == "dub") {
+            lang = "sub"
+            fileId = findFileId(malId, ep, lang)
+        }
+        if (fileId == null) return false
 
         val src = app.get("$mega/stream/getSourcesNew?id=$fileId", referer = refPlayer)
             .parsedSafe<Sources>() ?: return false
