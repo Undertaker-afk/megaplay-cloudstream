@@ -8,7 +8,7 @@ concurrency:
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 6 * * *'   # daily: detect MegaPlay/Tenrai changes (key rotation, API changes)
+    - cron: '0 6 * * 1'   # weekly (Mondays): detect MegaPlay/Tenrai changes (key rotation, API changes)
   push:
     branches:
       # choose your default branch
