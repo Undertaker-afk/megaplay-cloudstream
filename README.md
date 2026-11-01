@@ -16,6 +16,24 @@ Anime provider for CloudStream 3.
 - **Settings**: extension settings (gear in the extension list) to choose Sub or Dub as the preferred language and to hide R+ / adult titles (off by default). If a dub is missing, playback falls back to the sub.
 - **Skip intro/outro**: the MAL id is attached to every title, so CloudStream's built-in skip feature and MAL/AniList sync work. (Extensions can't pass their own skip timestamps in this API version.)
 
+## Data saver (optional)
+
+Some titles only offer 1080p on MegaPlay. If you run your own re-encoding server, the extension can add a lower-resolution
+source for those titles to save mobile data. **Nothing about a server is included in this repository**: in the extension settings
+(gear next to MegaPlay) enter your own *Data saver server URL* and *API key*, and pick the target quality (240p / 360p / 480p).
+It only kicks in when MegaPlay offers nothing at or below the chosen quality, and adds an extra source named
+"... 360p (data saver)". "Run connection test" in the same menu checks the server and shows the IP it exits from.
+
+The server is any HTTP service that implements this small contract:
+
+| Request | Purpose |
+|---|---|
+| `POST /jobs` with header `X-API-Key` and JSON `{"url": "<hls url>", "height": 360, "headers": {"Referer": "...", "User-Agent": "..."}}` | Start (or reuse) a re-encode. Returns `{"id": "...", "playlist": "/path/to/index.m3u8"}` once playback can start. |
+| `GET <playlist>` and the segments it references | Standard HLS, no API key needed (the path is the capability). |
+| `GET /health`, `GET /ip` (with `X-API-Key`) | Used by the connection test. |
+
+`tools/Check.java` can verify such a server: `RECODER_URL=... RECODER_KEY=... java tools/Check.java`.
+
 ## Install
 
 In CloudStream: Settings > Extensions > Add repository, then paste:

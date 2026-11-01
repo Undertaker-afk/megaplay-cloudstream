@@ -176,6 +176,56 @@ public class Check {
         }
     }
 
+
+    // ---- Optional: data-saver server contract (only when RECODER_URL and RECODER_KEY are set) ----
+
+    static Resp post(String url, String key, String json) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setRequestMethod("POST");
+        c.setDoOutput(true);
+        c.setRequestProperty("X-API-Key", key);
+        c.setRequestProperty("Content-Type", "application/json");
+        c.setConnectTimeout(20000);
+        c.setReadTimeout(90000);
+        c.getOutputStream().write(json.getBytes(StandardCharsets.UTF_8));
+        int code = c.getResponseCode();
+        InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
+        return new Resp(code, in == null ? "" : new String(in.readAllBytes(), StandardCharsets.UTF_8));
+    }
+
+    /** Same requests the extension's data-saver makes, against a user-supplied server. */
+    static void recoder(String base, String key) throws Exception {
+        base = base.replaceAll("/+$", "");
+        System.out.println("\n[Data saver] contract check (server from env, not printed)");
+        Resp h = get(base + "/health", null, null);
+        req(h.code == 200, "health", "health HTTP " + h.code);
+        HttpURLConnection c = (HttpURLConnection) new URL(base + "/ip").openConnection();
+        c.setRequestProperty("X-API-Key", key);
+        req(c.getResponseCode() == 200, "API key accepted", "API key rejected: HTTP " + c.getResponseCode());
+        HttpURLConnection bad = (HttpURLConnection) new URL(base + "/ip").openConnection();
+        bad.setRequestProperty("X-API-Key", "wrong");
+        req(bad.getResponseCode() == 401, "wrong key rejected", "wrong key got HTTP " + bad.getResponseCode());
+
+        // Real MegaPlay stream, resolved exactly like the provider does.
+        String id = fileId(52299, 1, "sub");
+        Resp src = get(MEGA + "/stream/getSourcesNew?id=" + id, REF_PLAYER, null);
+        String master = find("\"file\"\\s*:\\s*\"([^\"]+)\"", decrypt(find("\"enc\"\\s*:\\s*\"([^\"]+)\"", src.body))).replace("\\/", "/");
+        String body = "{\"url\":\"" + master + "\",\"height\":360,\"headers\":{\"Referer\":\"" + REF_PLAYER + "\",\"User-Agent\":\"" + UA + "\"}}";
+        long t0 = System.currentTimeMillis();
+        Resp job = post(base + "/jobs", key, body);
+        String playlist = find("\"playlist\"\\s*:\\s*\"([^\"]+)\"", job.body);
+        req(job.code == 200 && playlist != null, "job created in " + (System.currentTimeMillis() - t0) + " ms", "job HTTP " + job.code + ": " + job.body);
+        if (playlist == null) return;
+        Resp pl = get(base + playlist, null, null);
+        req(pl.code == 200 && pl.body.contains("#EXTINF"), "recoded playlist served", "playlist HTTP " + pl.code);
+        String seg = null;
+        for (String l : pl.body.split("\\r?\\n")) if (l.endsWith(".ts")) { seg = l; break; }
+        if (seg != null) {
+            Resp s = get(new URL(new URL(base + playlist), seg).toString(), null, "bytes=0-1023");
+            req(s.code == 200 || s.code == 206, "recoded segment downloads", "segment HTTP " + s.code);
+        }
+    }
+
     // ---- Provider-specific regressions ----
 
     static void regressions() {
@@ -211,6 +261,13 @@ public class Check {
                 try { stream(mal, ep, lang, label, lang.equals("sub")); }
                 catch (Exception e) { if (lang.equals("sub")) fail(label + " " + lang + ": " + e); else warn(label + " " + lang + ": " + e); }
             }
+        }
+
+        String ru = System.getenv("RECODER_URL"), rk = System.getenv("RECODER_KEY");
+        if (ru != null && rk != null && !ru.isBlank() && !rk.isBlank()) {
+            try { recoder(ru, rk); } catch (Exception e) { fail("data saver: " + e); }
+        } else {
+            System.out.println("\n[Data saver] skipped (set RECODER_URL and RECODER_KEY to test your own server)");
         }
 
         System.out.println("\n==== " + passed + " passed, " + warned + " warnings, " + failed + " failed ====");

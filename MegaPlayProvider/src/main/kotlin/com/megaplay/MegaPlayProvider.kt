@@ -433,6 +433,71 @@ class MegaPlayProvider : MainAPI() {
                 this.headers = headers
             }
         )
+
+        // Optional data saver; must never break normal playback.
+        try {
+            addDataSaverLink(master, label, headers, callback)
+        } catch (e: Exception) {
+            // ignore: the regular links above are already delivered
+        }
         return true
+    }
+
+    // ---- Optional data-saver server (user-supplied URL + API key, see README) ----
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class RecodeJob(val id: String? = null, val playlist: String? = null)
+
+    /**
+     * Only when MegaPlay offers nothing at or below the chosen height: ask the user's own recode
+     * server to re-encode the stream to that height and add its playlist as an extra source.
+     */
+    private suspend fun addDataSaverLink(
+        master: String, label: String, headers: Map<String, String>, callback: (ExtractorLink) -> Unit
+    ) {
+        val base = MegaPlayPlugin.recoderUrl() ?: return
+        val key = MegaPlayPlugin.recoderKey() ?: return
+        val target = MegaPlayPlugin.recoderHeight()
+
+        val playlist = app.get(master, referer = refPlayer, headers = mapOf("User-Agent" to ua), cacheTime = 0).text
+        val heights = Regex("""#EXT-X-STREAM-INF:[^\n]*RESOLUTION=\d+x(\d+)""").findAll(playlist)
+            .map { it.groupValues[1].toInt() }.toList()
+        if (heights.isEmpty() || heights.min() <= target) return
+
+        val job = app.post(
+            "$base/jobs",
+            headers = mapOf("X-API-Key" to key),
+            json = mapOf("url" to master, "height" to target, "headers" to headers),
+            timeout = 60,
+            cacheTime = 0,
+        ).parsedSafe<RecodeJob>() ?: return
+        val path = job.playlist ?: return
+
+        callback(
+            newExtractorLink("$label data saver", "$label ${target}p (data saver)", base + path, ExtractorLinkType.M3U8) {
+                this.referer = ""
+                this.quality = target
+            }
+        )
+    }
+
+    /** Reports whether the configured data-saver server is reachable and which IP it exits from. */
+    suspend fun diagnoseRecoder(): String {
+        val base = MegaPlayPlugin.recoderUrl()
+        val key = MegaPlayPlugin.recoderKey()
+        if (base == null || key == null) return "Data saver: not configured (set server URL and API key)."
+        val out = StringBuilder("Data saver server: $base")
+        try {
+            val health = app.get("$base/health", cacheTime = 0, timeout = 15)
+            out.append("\n1. Health: HTTP ${health.code}")
+            val ip = app.get("$base/ip", headers = mapOf("X-API-Key" to key), cacheTime = 0, timeout = 20)
+            out.append("\n2. API key: ").append(if (ip.code == 200) "accepted" else "REJECTED (HTTP ${ip.code})")
+            if (ip.code == 200) out.append("\n3. Server exits via IP: ").append(
+                Regex(""""egress_ip"\s*:\s*"([^"]+)"""").find(ip.text)?.groupValues?.get(1) ?: ip.text.take(60)
+            )
+        } catch (e: Exception) {
+            out.append("\nERROR: ${e.javaClass.simpleName}: ${e.message}")
+        }
+        return out.toString()
     }
 }
