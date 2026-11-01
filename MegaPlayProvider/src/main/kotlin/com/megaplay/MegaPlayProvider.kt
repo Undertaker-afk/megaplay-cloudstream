@@ -9,6 +9,7 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
+import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -301,7 +302,8 @@ class MegaPlayProvider : MainAPI() {
         val key = SecretKeySpec(aesKey.toByteArray().copyOf(32), "AES")
         val iv = IvParameterSpec(aesIv.toByteArray().copyOf(16))
         val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding").apply { init(Cipher.DECRYPT_MODE, key, iv) }
-        String(cipher.doFinal(Base64.decode(enc, Base64.URL_SAFE or Base64.NO_WRAP)))
+        val padded = enc.padEnd((enc.length + 3) / 4 * 4, '=')
+        String(cipher.doFinal(Base64.decode(padded, Base64.URL_SAFE)))
     } catch (e: Exception) {
         null
     }
@@ -309,8 +311,10 @@ class MegaPlayProvider : MainAPI() {
     /** The embed page intermittently serves an anti-bot page without a file id, so retry. */
     private suspend fun findFileId(malId: String, ep: String, lang: String): String? {
         repeat(3) {
-            val html = app.get("$mega/stream/mal/$malId/$ep/$lang", referer = refAnikoto).text
+            // cacheTime = 0: a cached anti-bot page would make every retry fail.
+            val html = app.get("$mega/stream/mal/$malId/$ep/$lang", referer = refAnikoto, cacheTime = 0).text
             Regex("""data-id="(\d+)"""").find(html)?.let { return it.groupValues[1] }
+            Thread.sleep(400L * (it + 1))
         }
         return null
     }
@@ -333,11 +337,15 @@ class MegaPlayProvider : MainAPI() {
         }
         if (fileId == null) return false
 
-        val src = app.get("$mega/stream/getSourcesNew?id=$fileId", referer = refPlayer)
-            .parsedSafe<Sources>() ?: return false
-        val master = src.enc?.let { decrypt(it) }?.let { parseJson<SourceFile>(it).file } ?: return false
+        val srcText = app.get("$mega/stream/getSourcesNew?id=$fileId", referer = refPlayer, cacheTime = 0).text
+        val src = tryParseJson<Sources>(srcText)
+        val enc = src?.enc ?: Regex(""""enc"\s*:\s*"([^"]+)"""").find(srcText)?.groupValues?.get(1)
+        val decrypted = enc?.let { decrypt(it) } ?: return false
+        val master = (tryParseJson<SourceFile>(decrypted)?.file
+            ?: Regex(""""file"\s*:\s*"([^"]+)"""").find(decrypted)?.groupValues?.get(1))
+            ?.replace("\\/", "/") ?: return false
 
-        src.tracks.orEmpty().filter { it.kind == "captions" && it.file != null }.forEach {
+        src?.tracks.orEmpty().filter { it.kind == "captions" && it.file != null }.forEach {
             subtitleCallback(newSubtitleFile(it.label ?: "Subtitle", it.file!!))
         }
 
@@ -346,7 +354,11 @@ class MegaPlayProvider : MainAPI() {
         val label = if (lang == "dub") "$name Dub" else "$name Sub"
 
         // One entry per quality in the master playlist -> the player's quality picker.
-        M3u8Helper.generateM3u8(label, master, refPlayer, headers = headers).forEach(callback)
+        try {
+            M3u8Helper.generateM3u8(label, master, refPlayer, headers = headers).forEach(callback)
+        } catch (e: Exception) {
+            // fall through to the Auto link below
+        }
 
         // Plus the raw master for adaptive "Auto" playback.
         callback(
