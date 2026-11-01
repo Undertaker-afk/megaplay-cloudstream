@@ -1,0 +1,47 @@
+[
+    {
+        "fileHash": "sha256-bdce7389b61607f4a3af0e01a16c3cf1745a5092a2e847ecc9724f7c0ca1be24",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/Undertaker-afk/megaplay-cloudstream",
+        "fileSize": 60487,
+        "status": 1,
+        "language": "en",
+        "authors": [
+            "floga"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "version": 3,
+        "internalName": "FrameXtvProvider",
+        "description": "FrameXTV: movies, TV series and anime with multi-server streams, cast, trailers and subtitles",
+        "url": "https://raw.githack.com/Undertaker-afk/megaplay-cloudstream/builds/FrameXtvProvider.cs3",
+        "name": "FrameXtvProvider"
+    },
+    {
+        "iconUrl": "https://megaplay.buzz/images/favicon.png",
+        "fileHash": "sha256-280c64cf60ea7327720e1ae25de5fec61b3edd091b5ab5dee93e7febadf8f245",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/Undertaker-afk/megaplay-cloudstream",
+        "fileSize": 116882,
+        "status": 1,
+        "language": "en",
+        "authors": [
+            "floga"
+        ],
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "version": 16,
+        "internalName": "MegaPlayProvider",
+        "description": "MegaPlay (sub/dub anime) and Hanime.tv (hentai) providers",
+        "url": "https://raw.githack.com/Undertaker-afk/megaplay-cloudstream/builds/MegaPlayProvider.cs3",
+        "name": "MegaPlayProvider"
+    }
+]
