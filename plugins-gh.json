@@ -1,0 +1,24 @@
+[
+    {
+        "iconUrl": "https://megaplay.buzz/images/favicon.png",
+        "fileHash": "sha256-96892e92d28781f07981e2a357dbb7e678f90c6072e1289c42f412bfc28c3a0d",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/Undertaker-afk/megaplay-cloudstream",
+        "fileSize": 54561,
+        "status": 1,
+        "language": "en",
+        "authors": [
+            "floga"
+        ],
+        "tvTypes": [
+            "Anime",
+            "AnimeMovie",
+            "OVA"
+        ],
+        "version": 8,
+        "internalName": "MegaPlayProvider",
+        "description": "Anime from MegaPlay (sub/dub, selectable quality) with Tenrai (MAL) metadata",
+        "url": "https://raw.githubusercontent.com/Undertaker-afk/megaplay-cloudstream/builds/MegaPlayProvider.cs3",
+        "name": "MegaPlayProvider"
+    }
+]
