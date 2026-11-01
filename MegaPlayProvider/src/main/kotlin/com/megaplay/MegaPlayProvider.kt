@@ -38,13 +38,13 @@ class MegaPlayProvider : MainAPI() {
     private val aesIv = "W0;27ToaUpl_P%'c"
 
     override val mainPage = mainPageOf(
-        "$api/top/anime?filter=airing&sfw" to "Trending now",
-        "$api/seasons/now?sfw" to "Airing this season",
-        "$api/top/anime?filter=bypopularity&sfw" to "Most popular",
-        "$api/top/anime?sfw" to "Top rated",
-        "$api/top/anime?type=movie&sfw" to "Top movies",
-        "$api/top/anime?filter=favorite&sfw" to "Fan favorites",
-        "$api/seasons/upcoming?sfw" to "Upcoming",
+        "$api/top/anime?filter=airing" to "Trending now",
+        "$api/seasons/now" to "Airing this season",
+        "$api/top/anime?filter=bypopularity" to "Most popular",
+        "$api/top/anime" to "Top rated",
+        "$api/top/anime?type=movie" to "Top movies",
+        "$api/top/anime?filter=favorite" to "Fan favorites",
+        "$api/seasons/upcoming" to "Upcoming",
     )
 
     // ---- Tenrai models ----
@@ -157,8 +157,11 @@ class MegaPlayProvider : MainAPI() {
         }
     }
 
-    private fun withPage(url: String, page: Int): String =
-        url + (if (url.contains("?")) "&" else "?") + "page=$page"
+    /** Adds paging, plus Tenrai's safe-for-work filter when enabled in the extension settings. */
+    private fun withPage(url: String, page: Int): String {
+        val sep = if (url.contains("?")) "&" else "?"
+        return url + sep + "page=$page" + if (MegaPlayPlugin.hideAdult()) "&sfw" else ""
+    }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val resp = app.get(withPage(request.data, page), referer = refAnikoto).parsedSafe<ListResp>()
@@ -167,7 +170,8 @@ class MegaPlayProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val url = "$api/anime?q=${java.net.URLEncoder.encode(query, "UTF-8")}&limit=25&sfw"
+        val url = "$api/anime?q=${java.net.URLEncoder.encode(query, "UTF-8")}&limit=25" +
+            if (MegaPlayPlugin.hideAdult()) "&sfw" else ""
         return app.get(url, referer = refAnikoto).parsedSafe<ListResp>()?.data.orEmpty()
             .mapNotNull { it.toSearch() }
             .distinctBy { it.url }

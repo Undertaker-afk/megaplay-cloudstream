@@ -13,7 +13,7 @@ Anime provider for CloudStream 3.
 - **Ratings & runtime**: show score, per-episode scores and run times.
 - **Next airing**: countdown to the next episode of airing shows (from the weekly JST broadcast slot).
 - **Trailers**: trailer button when MAL has one.
-- **Settings**: extension settings (gear in the extension list) to choose Sub or Dub as the preferred language. If a dub is missing, playback falls back to the sub.
+- **Settings**: extension settings (gear in the extension list) to choose Sub or Dub as the preferred language and to hide R+ / adult titles (off by default). If a dub is missing, playback falls back to the sub.
 - **Skip intro/outro**: the MAL id is attached to every title, so CloudStream's built-in skip feature and MAL/AniList sync work. (Extensions can't pass their own skip timestamps in this API version.)
 
 ## Install
