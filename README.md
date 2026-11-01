@@ -21,7 +21,7 @@ Anime provider for CloudStream 3.
 In CloudStream: Settings > Extensions > Add repository, then paste:
 
 ```
-https://raw.githubusercontent.com/Undertaker-afk/megaplay-cloudstream/main/repo.json
+https://raw.githack.com/Undertaker-afk/megaplay-cloudstream/main/repo.json
 ```
 
 ## Legal
