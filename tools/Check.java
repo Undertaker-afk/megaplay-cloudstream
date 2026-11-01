@@ -31,6 +31,7 @@ public class Check {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setRequestProperty("User-Agent", UA);
         if (referer != null) c.setRequestProperty("Referer", referer);
+        if (url.contains("getSourcesNew")) c.setRequestProperty("X-Requested-With", "XMLHttpRequest");
         if (range != null) c.setRequestProperty("Range", range);
         c.setConnectTimeout(20000);
         c.setReadTimeout(30000);
@@ -198,6 +199,7 @@ public class Check {
                 {42310, 1, "Cyberpunk: Edgerunners"},
                 {52991, 1, "Sousou no Frieren"},
                 {52299, 1, "Solo Leveling"},
+                {58567, 1, "Solo Leveling Season 2 (dub needs AJAX header)"},
                 {32281, 1, "Kimi no Na wa (movie)"},
         };
         for (Object[] c : cases) {

@@ -20,6 +20,7 @@ public class LinkTest {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setRequestProperty("User-Agent", ua);
         if (referer != null) c.setRequestProperty("Referer", referer);
+        if (url.contains("getSourcesNew")) c.setRequestProperty("X-Requested-With", "XMLHttpRequest");
         c.setConnectTimeout(15000);
         c.setReadTimeout(15000);
         int code = c.getResponseCode();

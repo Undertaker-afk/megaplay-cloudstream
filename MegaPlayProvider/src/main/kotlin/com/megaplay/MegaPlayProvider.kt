@@ -323,6 +323,31 @@ class MegaPlayProvider : MainAPI() {
         return null
     }
 
+    // MegaPlay's stream-info endpoint rejects non-AJAX requests for some files.
+    private val ajaxHeaders = mapOf("X-Requested-With" to "XMLHttpRequest")
+
+    private class Resolved(val master: String, val tracks: List<Track>)
+
+    /** embed page -> file id -> encrypted sources -> decrypted master playlist URL. */
+    private suspend fun resolveStream(malId: String, ep: String, lang: String): Resolved? {
+        val fileId = findFileId(malId, ep, lang) ?: return null
+        var srcText = ""
+        for (attempt in 0..1) {
+            srcText = app.get(
+                "$mega/stream/getSourcesNew?id=$fileId", referer = refPlayer, headers = ajaxHeaders, cacheTime = 0
+            ).text
+            if (srcText.contains("\"enc\"")) break
+            Thread.sleep(400)
+        }
+        val src = tryParseJson<Sources>(srcText)
+        val enc = src?.enc ?: Regex(""""enc"\s*:\s*"([^"]+)"""").find(srcText)?.groupValues?.get(1) ?: return null
+        val decrypted = decrypt(enc) ?: return null
+        val master = (tryParseJson<SourceFile>(decrypted)?.file
+            ?: Regex(""""file"\s*:\s*"([^"]+)"""").find(decrypted)?.groupValues?.get(1))
+            ?.replace("\\/", "/") ?: return null
+        return Resolved(master, src?.tracks.orEmpty())
+    }
+
     /**
      * Runs the whole stream-resolution chain with the app's own HTTP client and
      * reports every stage (used by the "Connection test" in the settings menu).
@@ -338,7 +363,7 @@ class MegaPlayProvider : MainAPI() {
                 step("   Page starts with: " + page.text.replace(Regex("\\s+"), " ").take(160))
                 return out.toString()
             }
-            val srcText = app.get("$mega/stream/getSourcesNew?id=$id", referer = refPlayer, cacheTime = 0).text
+            val srcText = app.get("$mega/stream/getSourcesNew?id=$id", referer = refPlayer, headers = ajaxHeaders, cacheTime = 0).text
             val enc = Regex(""""enc"\s*:\s*"([^"]+)"""").find(srcText)?.groupValues?.get(1)
             step("2. Sources: ${srcText.length} bytes, encrypted field: ${if (enc != null) "found" else "MISSING"}")
             if (enc == null) {
@@ -373,25 +398,19 @@ class MegaPlayProvider : MainAPI() {
         if (parts.size != 3) return false
         // CloudStream prefixes episode data with mainUrl ("https://tenrai.net/61990|1|sub").
         val malId = parts[0].substringAfterLast("/")
-        val (ep, lang0) = parts[1] to parts[2]
-        // Fall back to the sub if the dub isn't available on MegaPlay.
-        var lang = lang0
-        var fileId = findFileId(malId, ep, lang)
-        if (fileId == null && lang == "dub") {
+        val ep = parts[1]
+        var lang = parts[2]
+
+        // Fall back to the sub if the dub is missing or fails at any step.
+        var stream = resolveStream(malId, ep, lang)
+        if (stream == null && lang == "dub") {
             lang = "sub"
-            fileId = findFileId(malId, ep, lang)
+            stream = resolveStream(malId, ep, lang)
         }
-        if (fileId == null) return false
+        if (stream == null) return false
+        val master = stream.master
 
-        val srcText = app.get("$mega/stream/getSourcesNew?id=$fileId", referer = refPlayer, cacheTime = 0).text
-        val src = tryParseJson<Sources>(srcText)
-        val enc = src?.enc ?: Regex(""""enc"\s*:\s*"([^"]+)"""").find(srcText)?.groupValues?.get(1)
-        val decrypted = enc?.let { decrypt(it) } ?: return false
-        val master = (tryParseJson<SourceFile>(decrypted)?.file
-            ?: Regex(""""file"\s*:\s*"([^"]+)"""").find(decrypted)?.groupValues?.get(1))
-            ?.replace("\\/", "/") ?: return false
-
-        src?.tracks.orEmpty().filter { it.kind == "captions" && it.file != null }.forEach {
+        stream.tracks.filter { it.kind == "captions" && it.file != null }.forEach {
             subtitleCallback(newSubtitleFile(it.label ?: "Subtitle", it.file!!))
         }
 
