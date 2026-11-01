@@ -46,7 +46,9 @@ jobs:
           chmod +x gradlew
           ./gradlew make makePluginsJson
           cp **/build/*.cs3 $GITHUB_WORKSPACE/builds
+          # Two plugin lists so repo.json can use two CDNs: githack (short cache) and raw.githubusercontent
           sed "s#raw.githubusercontent.com#raw.githack.com#g" build/plugins.json > $GITHUB_WORKSPACE/builds/plugins.json
+          cp build/plugins.json $GITHUB_WORKSPACE/builds/plugins-gh.json
 
       - name: Push builds
         run: |
