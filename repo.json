@@ -1,0 +1,8 @@
+{
+    "name": "MegaPlay",
+    "description": "MegaPlay anime provider with Tenrai metadata",
+    "manifestVersion": 1,
+    "pluginLists": [
+        "https://raw.githubusercontent.com/Undertaker-afk/megaplay-cloudstream/builds/plugins.json"
+    ]
+}
