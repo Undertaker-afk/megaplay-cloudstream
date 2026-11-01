@@ -323,6 +323,46 @@ class MegaPlayProvider : MainAPI() {
         return null
     }
 
+    /**
+     * Runs the whole stream-resolution chain with the app's own HTTP client and
+     * reports every stage (used by the "Connection test" in the settings menu).
+     */
+    suspend fun diagnose(malId: String = "61990", ep: String = "1", lang: String = "sub"): String {
+        val out = StringBuilder("Test: MAL $malId, episode $ep, $lang\n")
+        fun step(msg: String) { out.append("\n").append(msg) }
+        try {
+            val page = app.get("$mega/stream/mal/$malId/$ep/$lang", referer = refAnikoto, cacheTime = 0)
+            val id = Regex("""data-id="(\d+)"""").find(page.text)?.groupValues?.get(1)
+            step("1. Embed page: HTTP ${page.code}, ${page.text.length} bytes, file id: ${id ?: "NONE"}")
+            if (id == null) {
+                step("   Page starts with: " + page.text.replace(Regex("\\s+"), " ").take(160))
+                return out.toString()
+            }
+            val srcText = app.get("$mega/stream/getSourcesNew?id=$id", referer = refPlayer, cacheTime = 0).text
+            val enc = Regex(""""enc"\s*:\s*"([^"]+)"""").find(srcText)?.groupValues?.get(1)
+            step("2. Sources: ${srcText.length} bytes, encrypted field: ${if (enc != null) "found" else "MISSING"}")
+            if (enc == null) {
+                step("   Response starts with: " + srcText.replace(Regex("\\s+"), " ").take(160))
+                return out.toString()
+            }
+            val json = decrypt(enc)
+            step("3. Decrypt: " + if (json != null) "ok" else "FAILED")
+            val master = json?.let { Regex(""""file"\s*:\s*"([^"]+)"""").find(it)?.groupValues?.get(1) }
+                ?.replace("\\/", "/")
+            if (master == null) return out.toString()
+            step("   Master: $master")
+            val pl = app.get(master, referer = refPlayer, headers = mapOf("User-Agent" to ua), cacheTime = 0)
+            step("4. Master playlist: HTTP ${pl.code}, ${pl.text.length} bytes")
+            val names = Regex("""RESOLUTION=(\d+x\d+)""").findAll(pl.text).map { it.groupValues[1] }.toList()
+            step("   Qualities: " + if (names.isEmpty()) "none listed" else names.joinToString(", "))
+            if (pl.code != 200) step("   Body: " + pl.text.replace(Regex("\\s+"), " ").take(160))
+            step("\nAll stages passed — links should work.")
+        } catch (e: Exception) {
+            step("ERROR: ${e.javaClass.simpleName}: ${e.message}")
+        }
+        return out.toString()
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,

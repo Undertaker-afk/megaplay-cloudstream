@@ -5,6 +5,10 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
+import android.app.Activity
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.startCoroutine
 
 @CloudstreamPlugin
 class MegaPlayPlugin : Plugin() {
@@ -20,6 +24,7 @@ class MegaPlayPlugin : Plugin() {
         val items = arrayOf(
             "Preferred language: " + if (preferDub()) "Dub" else "Sub",
             "Hide R+ / adult titles: " + if (hideAdult()) "On" else "Off",
+            "Run connection test",
         )
         AlertDialog.Builder(ctx)
             .setTitle("MegaPlay settings")
@@ -31,10 +36,30 @@ class MegaPlayPlugin : Plugin() {
                 }
                 editor?.apply()
                 dialog.dismiss()
-                showSettings(ctx) // reopen so the new value is visible
+                if (which == 2) runConnectionTest(ctx) else showSettings(ctx) // reopen to show new values
             }
             .setNegativeButton("Close", null)
             .show()
+    }
+
+    private fun runConnectionTest(ctx: Context) {
+        val running = AlertDialog.Builder(ctx).setTitle("Connection test").setMessage("Running...")
+            .setPositiveButton("Close", null).show()
+        fun show(report: String) {
+            val ui = Runnable {
+                running.dismiss()
+                AlertDialog.Builder(ctx).setTitle("Connection test").setMessage(report)
+                    .setPositiveButton("Close", null).show()
+            }
+            (ctx as? Activity)?.runOnUiThread(ui) ?: ui.run()
+        }
+        Thread {
+            suspend { MegaPlayProvider().diagnose() }.startCoroutine(
+                Continuation(EmptyCoroutineContext) { result ->
+                    show(result.getOrElse { "ERROR: ${it.javaClass.simpleName}: ${it.message}" })
+                }
+            )
+        }.start()
     }
 
     companion object {
