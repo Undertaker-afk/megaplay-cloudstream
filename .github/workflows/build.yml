@@ -2,10 +2,13 @@ name: Build
 
 # https://docs.github.com/en/actions/learn-github-actions/workflow-syntax-for-github-actions#concurrency
 concurrency: 
-  group: "build"
+  group: "build-${{ github.event_name }}"
   cancel-in-progress: true
 
 on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'   # daily: detect MegaPlay/Tenrai changes (key rotation, API changes)
   push:
     branches:
       # choose your default branch
@@ -15,7 +18,23 @@ on:
       - '*.md'
 
 jobs:
+  live-check:
+    # Live end-to-end test of Tenrai + MegaPlay (embed -> sources -> decrypt -> playlist -> segments).
+    # Runs on every push and daily; a red run means upstream changed or the extension logic broke.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Live checks
+        run: java tools/Check.java
+
   build:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -49,6 +68,20 @@ jobs:
           # Two plugin lists so repo.json can use two CDNs: githack (short cache) and raw.githubusercontent
           sed "s#raw.githubusercontent.com#raw.githack.com#g" build/plugins.json > $GITHUB_WORKSPACE/builds/plugins.json
           cp build/plugins.json $GITHUB_WORKSPACE/builds/plugins-gh.json
+
+      - name: Verify build output
+        run: |
+          cd $GITHUB_WORKSPACE
+          test -s src/MegaPlayProvider/build/MegaPlayProvider.cs3 || { echo "missing .cs3"; exit 1; }
+          WANT=$(grep -oP '^version = \K[0-9]+' src/MegaPlayProvider/build.gradle.kts)
+          for f in plugins.json plugins-gh.json; do
+            GOT=$(grep -oP '"version": \K[0-9]+' builds/$f | head -1)
+            [ "$GOT" = "$WANT" ] || { echo "$f has version $GOT, expected $WANT"; exit 1; }
+            grep -q "MegaPlayProvider.cs3" builds/$f || { echo "$f has no download url"; exit 1; }
+          done
+          grep -q "raw.githack.com" builds/plugins.json || { echo "plugins.json is not using githack"; exit 1; }
+          grep -q "raw.githubusercontent.com" builds/plugins-gh.json || { echo "plugins-gh.json is not using raw.githubusercontent"; exit 1; }
+          echo "build output OK (version $WANT)"
 
       - name: Push builds
         run: |

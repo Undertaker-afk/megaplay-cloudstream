@@ -34,7 +34,8 @@ public class LinkTest {
 
     public static void main(String[] a) throws Exception {
         String mal = a[0], ep = a[1], lang = a[2];
-        if (a.length > 3) ua = a[3];
+        if (a.length > 3 && !a[3].isEmpty()) ua = a[3];
+        String server = a.length > 4 ? "&s=" + a[4] : "";
         System.out.println("UA: " + ua);
 
         String[] page = get(MEGA + "/stream/mal/" + mal + "/" + ep + "/" + lang, REF_ANIKOTO);
@@ -43,7 +44,7 @@ public class LinkTest {
         if (!m.find(0)) { System.out.println(page[1].substring(0, Math.min(400, page[1].length()))); return; }
         String id = m.group(1);
 
-        String[] src = get(MEGA + "/stream/getSourcesNew?id=" + id, REF_PLAYER);
+        String[] src = get(MEGA + "/stream/getSourcesNew?id=" + id + server, REF_PLAYER);
         System.out.println("2) getSourcesNew: HTTP " + src[0] + ", " + src[1].length() + "b");
         Matcher e = Pattern.compile("\"enc\"\\s*:\\s*\"([^\"]+)\"").matcher(src[1]);
         if (!e.find()) { System.out.println("   no enc field: " + src[1].substring(0, Math.min(300, src[1].length()))); return; }
