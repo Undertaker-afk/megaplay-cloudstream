@@ -29,6 +29,9 @@ class MegaPlayPlugin : Plugin() {
             "Data saver server URL: " + (recoderUrl() ?: "not set"),
             "Data saver API key: " + if (recoderKey() != null) "set" else "not set",
             "Data saver quality: ${recoderHeight()}p",
+            "Extra subtitles: " + SUBS_MODES[subsModeIndex()].second,
+            "Jimaku API key: " + if (jimakuKey() != null) "set" else "not set",
+            "Wyzie API key: " + if (wyzieKey() != null) "set" else "not set",
             "Run connection test",
         )
         AlertDialog.Builder(ctx)
@@ -50,7 +53,17 @@ class MegaPlayPlugin : Plugin() {
                         editor?.putInt(KEY_RECODE_HEIGHT, next)?.apply()
                         showSettings(ctx)
                     }
-                    5 -> runConnectionTest(ctx)
+                    5 -> {
+                        editor?.putString(KEY_SUBS_MODE, SUBS_MODES[(subsModeIndex() + 1) % SUBS_MODES.size].first)?.apply()
+                        showSettings(ctx)
+                    }
+                    6 -> askText(ctx, "Jimaku API key", "API key from jimaku.cc", "", true) {
+                        prefs?.edit()?.putString(KEY_JIMAKU, it.trim())?.apply()
+                    }
+                    7 -> askText(ctx, "Wyzie API key", "API key from sub.wyzie.io", "", true) {
+                        prefs?.edit()?.putString(KEY_WYZIE, it.trim())?.apply()
+                    }
+                    8 -> runConnectionTest(ctx)
                 }
             }
             .setNegativeButton("Close", null)
@@ -91,7 +104,7 @@ class MegaPlayPlugin : Plugin() {
         Thread {
             suspend {
                 val provider = MegaPlayProvider()
-                provider.diagnose() + "\n\n" + provider.diagnoseRecoder()
+                provider.diagnose() + "\n\n" + ExtraSubtitles().diagnose() + "\n\n" + provider.diagnoseRecoder()
             }.startCoroutine(
                 Continuation(EmptyCoroutineContext) { result ->
                     show(result.getOrElse { "ERROR: ${it.javaClass.simpleName}: ${it.message}" })
@@ -106,7 +119,13 @@ class MegaPlayPlugin : Plugin() {
         private const val KEY_RECODE_URL = "recode_url"
         private const val KEY_RECODE_KEY = "recode_key"
         private const val KEY_RECODE_HEIGHT = "recode_height"
+        private const val KEY_SUBS_MODE = "subs_mode"
+        private const val KEY_JIMAKU = "jimaku_key"
+        private const val KEY_WYZIE = "wyzie_key"
         private val HEIGHTS = listOf(240, 360, 480)
+
+        /** Extra subtitle sources: off, only when MegaPlay has no captions, or always. */
+        val SUBS_MODES = listOf("off" to "Off", "fallback" to "Only when MegaPlay has none", "always" to "Always")
         var prefs: SharedPreferences? = null
 
         fun preferDub(): Boolean = prefs?.getString(KEY_LANG, "sub") == "dub"
@@ -118,6 +137,15 @@ class MegaPlayPlugin : Plugin() {
         fun recoderUrl(): String? =
             prefs?.getString(KEY_RECODE_URL, null)?.trim()?.trimEnd('/')
                 ?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+
+        fun subsModeIndex(): Int =
+            SUBS_MODES.indexOfFirst { it.first == prefs?.getString(KEY_SUBS_MODE, "fallback") }.takeIf { it >= 0 } ?: 1
+
+        fun subsMode(): String = SUBS_MODES[subsModeIndex()].first
+
+        fun jimakuKey(): String? = prefs?.getString(KEY_JIMAKU, null)?.trim()?.takeIf { it.isNotEmpty() }
+
+        fun wyzieKey(): String? = prefs?.getString(KEY_WYZIE, null)?.trim()?.takeIf { it.isNotEmpty() }
 
         fun recoderKey(): String? = prefs?.getString(KEY_RECODE_KEY, null)?.trim()?.takeIf { it.isNotEmpty() }
 

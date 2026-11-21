@@ -61,3 +61,17 @@ The `.cs3` file lands in `MegaPlayProvider/build/`. Copy it to your phone and in
 - MegaPlay's CDN is referer-gated; the provider sends the right `Referer`.
 - Not every show is mapped on MegaPlay by MAL id; unmapped shows return no links.
 - If playback stops working, MegaPlay probably changed the `enc` key/IV (see `aesKey` / `aesIv` in `MegaPlayProvider.kt`).
+
+## Extra subtitles
+
+MegaPlay's dub streams have no captions, so the dub reuses the sub's tracks (the "Dubtitle" track first).
+In the extension settings, **Extra subtitles** can also pull English subtitles from other sources
+(off / only when MegaPlay has none / always; default: only when MegaPlay has none):
+
+| Source | Key needed | Lookup |
+|---|---|---|
+| OpenSubtitles (via Stremio) | no | MAL id -> IMDb (ARM), season + episode |
+| Jimaku | yes, set in settings | MAL id -> AniList (ARM), episode |
+| Wyzie | yes, set in settings | MAL id -> IMDb (ARM), season + episode |
+
+Sources that need a key are skipped until you enter one. "Run connection test" reports each source.

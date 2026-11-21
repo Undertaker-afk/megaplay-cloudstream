@@ -228,6 +228,19 @@ public class Check {
 
     // ---- Provider-specific regressions ----
 
+    /** Keyless extra subtitle sources: MAL id -> IMDb via ARM, then Stremio OpenSubtitles. */
+    static void extraSubtitles() throws Exception {
+        System.out.println("\n[Extra subtitles] Solo Leveling S2 episode 1");
+        Resp arm = get("https://arm.haglund.dev/api/v2/ids?source=myanimelist&id=58567", null, null);
+        String imdb = find("\"imdb\"\\s*:\\s*\"(tt\\d+)\"", arm.body());
+        req(arm.code() == 200 && imdb != null, "ARM maps MAL 58567 -> " + imdb, "ARM mapping failed: HTTP " + arm.code());
+        if (imdb == null) return;
+        Resp os = get("https://opensubtitles-v3.strem.io/subtitles/series/" + imdb + ":2:1.json", null, null);
+        int eng = os.body().split("\"lang\"\\s*:\\s*\"eng\"", -1).length - 1;
+        if (os.code() == 200 && eng > 0) ok("OpenSubtitles: " + eng + " English track(s)");
+        else warn("OpenSubtitles: HTTP " + os.code() + ", " + eng + " English track(s)");
+    }
+
     static void regressions() {
         System.out.println("\n[Provider] regressions");
         // CloudStream prefixes episode data with mainUrl; the provider must still recover the MAL id.
@@ -262,6 +275,8 @@ public class Check {
                 catch (Exception e) { if (lang.equals("sub")) fail(label + " " + lang + ": " + e); else warn(label + " " + lang + ": " + e); }
             }
         }
+
+        try { extraSubtitles(); } catch (Exception e) { warn("extra subtitles: " + e); }
 
         String ru = System.getenv("RECODER_URL"), rk = System.getenv("RECODER_KEY");
         if (ru != null && rk != null && !ru.isBlank() && !rk.isBlank()) {

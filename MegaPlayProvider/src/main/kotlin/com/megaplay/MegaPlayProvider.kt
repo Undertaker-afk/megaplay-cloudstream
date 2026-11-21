@@ -425,6 +425,16 @@ class MegaPlayProvider : MainAPI() {
             subtitleCallback(newSubtitleFile(it.label ?: "Subtitle", it.file!!))
         }
 
+        // Optional extra sources (OpenSubtitles, Jimaku, Wyzie); must never break playback.
+        val mode = MegaPlayPlugin.subsMode()
+        if (mode == "always" || (mode == "fallback" && captions.isEmpty())) {
+            try {
+                ExtraSubtitles().fetch(malId, ep, subtitleCallback)
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+
         // The CDN is referer-gated.
         val headers = mapOf("Referer" to refPlayer, "User-Agent" to ua)
         val label = if (lang == "dub") "$name Dub" else "$name Sub"
