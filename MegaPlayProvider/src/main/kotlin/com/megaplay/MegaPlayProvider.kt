@@ -421,8 +421,10 @@ class MegaPlayProvider : MainAPI() {
             // "Dubtitle" tracks are written for the dub audio, so offer them first.
             captions = captions.sortedByDescending { it.label?.contains("dubtitle", ignoreCase = true) == true }
         }
+        // The subtitle host answers 403 without MegaPlay's Referer.
+        val subHeaders = mapOf("Referer" to refPlayer, "User-Agent" to ua)
         captions.forEach {
-            subtitleCallback(newSubtitleFile(it.label ?: "Subtitle", it.file!!))
+            subtitleCallback(newSubtitleFile(it.label ?: "Subtitle", it.file!!) { headers = subHeaders })
         }
 
         // Optional extra sources (OpenSubtitles, Jimaku, Wyzie); must never break playback.

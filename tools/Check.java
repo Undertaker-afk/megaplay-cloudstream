@@ -137,6 +137,16 @@ public class Check {
 
         int subs = src.body.split("\"kind\":\"captions\"", -1).length - 1;
         if (subs > 0) ok(subs + " subtitle tracks"); else warn(tag + ": no subtitle tracks");
+        if (subs > 0) {
+            // The subtitle host is Referer-gated; the extension must send MegaPlay's Referer.
+            String vtt = find("\"file\"\\s*:\\s*\"([^\"]+\\.vtt)\"[^}]*\"kind\"\\s*:\\s*\"captions\"", src.body);
+            if (vtt != null) {
+                vtt = vtt.replace("\\/", "/");
+                Resp v = get(vtt, "https://megaplay.buzz/", null);
+                req(v.code() == 200 && v.body().startsWith("WEBVTT"), "subtitle file downloads with Referer",
+                        tag + ": subtitle file not downloadable with Referer: HTTP " + v.code());
+            }
+        }
         if (src.body.contains("\"intro\"")) ok("intro/outro timestamps present"); else warn(tag + ": no intro/outro data");
 
         Resp pl = get(master, REF_PLAYER, null);
