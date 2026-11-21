@@ -29,7 +29,7 @@ import javax.crypto.spec.SecretKeySpec
  */
 class HanimeProvider : MainAPI() {
     override var mainUrl = "https://hanime.tv"
-    override var name = "Hanime.tv"
+    override var name = "Hanime"
     override var lang = "en"
     override val hasMainPage = true
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
@@ -318,6 +318,29 @@ class HanimeProvider : MainAPI() {
     ): Boolean {
         val slug = data.substringAfterLast("/").substringBefore("?")
         if (slug.isBlank()) return false
+        return emitLinks(slug, callback)
+    }
+
+    private fun normalize(s: String): String = s.lowercase().filter { it.isLetterOrDigit() }
+
+    /**
+     * Used by MegaPlay as an alternative source: finds the hanime video for [ep] of a show known
+     * under [titles] (matched by name + trailing episode number) and emits its HLS links.
+     */
+    suspend fun addLinksFor(titles: List<String>, ep: Int, callback: (ExtractorLink) -> Unit): Boolean {
+        val wanted = titles.map { normalize(it) }.filter { it.isNotEmpty() }.toSet()
+        if (wanted.isEmpty()) return false
+        val matches = fetchHits().filter { h ->
+            val n = h.name ?: return@filter false
+            !h.slug.isNullOrBlank() && (normalize(n) in wanted || normalize(baseTitle(n)) in wanted)
+        }
+        val pick = matches.firstOrNull { episodeNumber(it.name) == ep }
+            ?: matches.singleOrNull()?.takeIf { ep == 1 && episodeNumber(it.name) == null }
+            ?: return false
+        return emitLinks(pick.slug!!, callback)
+    }
+
+    private suspend fun emitLinks(slug: String, callback: (ExtractorLink) -> Unit): Boolean {
         val sources = handshake(slug) ?: return false
         val playable = sources.filter { it.kind == "normal" && !it.src.isNullOrBlank() }
             .sortedByDescending { it.height ?: 0 }

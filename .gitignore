@@ -13,3 +13,7 @@ local.properties
 .vscode
 # network captures contain cookies
 *.har
+
+# exported agent sessions contain cookies/tokens
+hanime-tv-provider-implementation.json
+ses_*.json
