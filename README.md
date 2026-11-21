@@ -1,6 +1,6 @@
 # MegaPlay – CloudStream 3 extension
 
-Anime provider for CloudStream 3.
+Two CloudStream 3 providers: **MegaPlay** (mainstream anime) and **Hanime.tv** (adult/hentai).
 
 - **Metadata** (search, home page, posters, synopsis, episode list): Tenrai API (`api.tenrai.org/v1`, Jikan/MAL clone).
 - **Streaming**: MegaPlay. The provider resolves `megaplay.buzz/stream/mal/{malId}/{ep}/{sub|dub}` to the player file id, calls `/stream/getSourcesNew`, AES-decrypts the `enc` field and returns the raw `master.m3u8`.
@@ -15,6 +15,17 @@ Anime provider for CloudStream 3.
 - **Trailers**: trailer button when MAL has one.
 - **Settings**: extension settings (gear in the extension list) to choose Sub or Dub as the preferred language and to hide R+ / adult titles (off by default). If a dub is missing, playback falls back to the sub.
 - **Skip intro/outro**: the MAL id is attached to every title, so CloudStream's built-in skip feature and MAL/AniList sync work. (Extensions can't pass their own skip timestamps in this API version.)
+
+## Hanime.tv provider
+
+A second provider, **Hanime.tv**, uses hanime's own catalogue and player APIs. It only lists videos hanime actually hosts:
+
+- **Browse / search / title pages** come from `guest.freeanimehentai.net/api/v11/search_hvs` (the same dataset the site's own search worker uses). Results are sorted/filtered locally and cached for 30 minutes. Series episodes are grouped from the videos that exist in that dataset.
+- **Playback** uses the player's `POST auth.hanime.tv/api/v11/handshake`. The extension reproduces the site's `web2` signature (`SHA-256` of the timestamp with its two salts) and seals the request with AES-256-GCM, then decrypts the `x-token` response header to get fresh HLS URLs for every available quality. No WebView or WASM is involved.
+
+The HLS segments are AES-128 encrypted with the key published by the site (`ct.htv-services.com/sign.bin`); CloudStream's player handles that automatically.
+
+Hanime's API is guarded by Cloudflare. If direct handshakes return 403 (common from VPN / data-centre IPs), set an optional **Hanime relay URL** in the extension settings — requests are then sent to `<relay>/api/v11/handshake` (with an optional Bearer secret). The "Test Hanime handshake" settings action reports each step.
 
 ## Data saver (optional)
 

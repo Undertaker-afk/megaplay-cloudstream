@@ -11,3 +11,5 @@
 .cxx
 local.properties
 .vscode
+# network captures contain cookies
+*.har

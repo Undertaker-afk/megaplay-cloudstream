@@ -17,6 +17,7 @@ class MegaPlayPlugin : Plugin() {
     override fun load(context: Context) {
         prefs = context.getSharedPreferences("megaplay", Context.MODE_PRIVATE)
         registerMainAPI(MegaPlayProvider())
+        registerMainAPI(HanimeProvider())
 
         // Settings button for this extension in CloudStream's extension list.
         openSettings = { ctx -> showSettings(ctx) }
@@ -33,6 +34,9 @@ class MegaPlayPlugin : Plugin() {
             "Jimaku API key: " + if (jimakuKey() != null) "set" else "not set",
             "Wyzie API key: " + if (wyzieKey() != null) "set" else "not set",
             "Run connection test",
+            "Hanime relay URL: " + (hanimeRelayUrl() ?: "not set (direct)"),
+            "Hanime relay secret: " + if (hanimeRelaySecret() != null) "set" else "not set",
+            "Test Hanime handshake",
         )
         AlertDialog.Builder(ctx)
             .setTitle("MegaPlay settings")
@@ -64,6 +68,13 @@ class MegaPlayPlugin : Plugin() {
                         prefs?.edit()?.putString(KEY_WYZIE, it.trim())?.apply()
                     }
                     8 -> runConnectionTest(ctx)
+                    9 -> askText(ctx, "Hanime relay URL", "https://your-relay.example", hanimeRelayUrl() ?: "", false) {
+                        prefs?.edit()?.putString(KEY_HANIME_RELAY, it.trim())?.apply()
+                    }
+                    10 -> askText(ctx, "Hanime relay secret", "Bearer secret (optional)", "", true) {
+                        prefs?.edit()?.putString(KEY_HANIME_SECRET, it.trim())?.apply()
+                    }
+                    11 -> runHanimeTest(ctx)
                 }
             }
             .setNegativeButton("Close", null)
@@ -83,7 +94,7 @@ class MegaPlayPlugin : Plugin() {
         }
         AlertDialog.Builder(ctx)
             .setTitle(title)
-            .setMessage(if (secret) "Leave empty to clear. Stored only on this device." else "Leave empty to disable the data saver.")
+            .setMessage("Leave empty to clear. Stored only on this device.")
             .setView(input)
             .setPositiveButton("Save") { _, _ -> onSave(input.text.toString()); showSettings(ctx) }
             .setNegativeButton("Cancel") { _, _ -> showSettings(ctx) }
@@ -113,6 +124,29 @@ class MegaPlayPlugin : Plugin() {
         }.start()
     }
 
+    /** Same async dialog pattern as the MegaPlay connection test. */
+    private fun runHanimeTest(ctx: Context) {
+        val running = AlertDialog.Builder(ctx).setTitle("Hanime handshake test").setMessage("Running...")
+            .setPositiveButton("Close", null).show()
+        fun show(report: String) {
+            val ui = Runnable {
+                running.dismiss()
+                AlertDialog.Builder(ctx).setTitle("Hanime handshake test").setMessage(report)
+                    .setPositiveButton("Close", null).show()
+            }
+            (ctx as? Activity)?.runOnUiThread(ui) ?: ui.run()
+        }
+        Thread {
+            suspend {
+                HanimeProvider().diagnose()
+            }.startCoroutine(
+                Continuation(EmptyCoroutineContext) { result ->
+                    show(result.getOrElse { "ERROR: ${it.javaClass.simpleName}: ${it.message}" })
+                }
+            )
+        }.start()
+    }
+
     companion object {
         private const val KEY_LANG = "preferred_lang"
         private const val KEY_HIDE_ADULT = "hide_adult"
@@ -122,6 +156,8 @@ class MegaPlayPlugin : Plugin() {
         private const val KEY_SUBS_MODE = "subs_mode"
         private const val KEY_JIMAKU = "jimaku_key"
         private const val KEY_WYZIE = "wyzie_key"
+        private const val KEY_HANIME_RELAY = "hanime_relay"
+        private const val KEY_HANIME_SECRET = "hanime_relay_secret"
         private val HEIGHTS = listOf(240, 360, 480)
 
         /** Extra subtitle sources: off, only when MegaPlay has no captions, or always. */
@@ -146,6 +182,14 @@ class MegaPlayPlugin : Plugin() {
         fun jimakuKey(): String? = prefs?.getString(KEY_JIMAKU, null)?.trim()?.takeIf { it.isNotEmpty() }
 
         fun wyzieKey(): String? = prefs?.getString(KEY_WYZIE, null)?.trim()?.takeIf { it.isNotEmpty() }
+
+        /** Optional relay for hanime's signed handshake (Cloudflare workaround). */
+        fun hanimeRelayUrl(): String? =
+            prefs?.getString(KEY_HANIME_RELAY, null)?.trim()?.trimEnd('/')
+                ?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+
+        fun hanimeRelaySecret(): String? =
+            prefs?.getString(KEY_HANIME_SECRET, null)?.trim()?.takeIf { it.isNotEmpty() }
 
         fun recoderKey(): String? = prefs?.getString(KEY_RECODE_KEY, null)?.trim()?.takeIf { it.isNotEmpty() }
 

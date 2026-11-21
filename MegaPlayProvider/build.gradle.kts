@@ -1,8 +1,8 @@
 // Use an integer for version numbers
-version = 11
+version = 12
 
 cloudstream {
-    description = "Anime from MegaPlay (sub/dub, selectable quality) with Tenrai (MAL) metadata"
+    description = "MegaPlay (sub/dub anime) and Hanime.tv (hentai) providers"
     authors = listOf("floga")
 
     /**
