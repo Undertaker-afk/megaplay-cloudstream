@@ -410,7 +410,18 @@ class MegaPlayProvider : MainAPI() {
         if (stream == null) return false
         val master = stream.master
 
-        stream.tracks.filter { it.kind == "captions" && it.file != null }.forEach {
+        var captions = stream.tracks.filter { it.kind == "captions" && it.file != null }
+        if (captions.isEmpty() && lang == "dub") {
+            // MegaPlay's dub streams ship without captions; the sub's tracks fit the same episode.
+            captions = try {
+                resolveStream(malId, ep, "sub")?.tracks.orEmpty().filter { it.kind == "captions" && it.file != null }
+            } catch (e: Exception) {
+                emptyList()
+            }
+            // "Dubtitle" tracks are written for the dub audio, so offer them first.
+            captions = captions.sortedByDescending { it.label?.contains("dubtitle", ignoreCase = true) == true }
+        }
+        captions.forEach {
             subtitleCallback(newSubtitleFile(it.label ?: "Subtitle", it.file!!))
         }
 
