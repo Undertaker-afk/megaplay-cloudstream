@@ -4,6 +4,9 @@ import android.util.Base64
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.LoadResponse.Companion.addDuration
+import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
+import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import java.security.MessageDigest
@@ -154,15 +157,32 @@ class HanimeProvider : MainAPI() {
 
     // ---- Catalogue ----
 
+    private fun parseHits(text: String): List<Hv>? = tryParseJson<HitsResp>(text)?.data ?: tryParseJson<List<Hv>>(text)
+
+    // The 4.5 MB dataset is also kept on disk so a cold start does not re-download it.
+    private val diskTtl = 6 * 60 * 60 * 1000L
+    private fun cacheFile() = MegaPlayPlugin.cacheDir?.let { java.io.File(it, "hanime_search_hvs.json") }
+
     private suspend fun fetchHits(force: Boolean = false): List<Hv> {
         if (!force && cachedHits != null && System.currentTimeMillis() - cachedAt < cacheTtl) {
             return cachedHits!!
         }
+        val file = cacheFile()
+        if (!force && file != null && file.exists() && System.currentTimeMillis() - file.lastModified() < diskTtl) {
+            val onDisk = try { parseHits(file.readText()) } catch (e: Exception) { null }
+            if (!onDisk.isNullOrEmpty()) {
+                cachedHits = onDisk
+                cachedAt = System.currentTimeMillis()
+                return onDisk
+            }
+        }
         val headers = mapOf("User-Agent" to ua, "Referer" to "$origin/")
         var hits: List<Hv>? = null
+        var raw: String? = null
         try {
             val text = app.get("$guestApi/api/v11/search_hvs", headers = headers, cacheTime = 0).text
-            hits = tryParseJson<HitsResp>(text)?.data ?: tryParseJson<List<Hv>>(text)
+            hits = parseHits(text)
+            raw = text
         } catch (e: Exception) {
             // fall through to the signed v10 endpoint
         }
@@ -175,9 +195,11 @@ class HanimeProvider : MainAPI() {
                 "x-time" to time,
             )
             val text = app.get("$cachedApi/api/v10/search_hvs", headers = signed, cacheTime = 0).text
-            hits = tryParseJson<HitsResp>(text)?.data ?: tryParseJson<List<Hv>>(text)
+            hits = parseHits(text)
+            raw = text
         }
         if (hits.isNullOrEmpty()) throw ErrorLoadingException("Hanime catalogue unavailable")
+        try { if (file != null && raw != null) file.writeText(raw) } catch (e: Exception) { /* cache is optional */ }
         cachedHits = hits
         cachedAt = System.currentTimeMillis()
         return hits
@@ -229,10 +251,35 @@ class HanimeProvider : MainAPI() {
         "created_at_unix" to "Recently added",
         "released_at_unix" to "Recently released",
         "downloads" to "Most downloaded",
+        // Tag / brand rows ("tag:<name>", "brand:<name>"); a name the catalogue does not have shows an empty row.
+        "tag:uncensored" to "Uncensored",
+        "tag:romance" to "Romance",
+        "tag:comedy" to "Comedy",
+        "tag:fantasy" to "Fantasy",
+        "tag:harem" to "Harem",
+        "tag:drama" to "Drama",
+        "tag:vanilla" to "Vanilla",
+        "tag:3d" to "3D",
+        "brand:Pink Pineapple" to "Pink Pineapple",
+        "brand:Mary Jane" to "Mary Jane",
+        "brand:Bunny Walker" to "Bunny Walker",
+        "brand:Queen Bee" to "Queen Bee",
+        "brand:Lune Pictures" to "Lune Pictures",
+        "brand:Pashmina" to "Pashmina",
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val all = sortedByKey(fetchHits(), request.data).distinctBy { it.slug }
+        val catalogue = fetchHits().distinctBy { it.slug }
+        val key = request.data
+        val all = when {
+            key.startsWith("tag:") -> key.removePrefix("tag:").let { tag ->
+                catalogue.filter { h -> h.tags.orEmpty().any { it.equals(tag, ignoreCase = true) } }
+            }.sortedByDescending { it.views ?: 0 }
+            key.startsWith("brand:") -> key.removePrefix("brand:").let { brand ->
+                catalogue.filter { it.brand?.contains(brand, ignoreCase = true) == true }
+            }.sortedByDescending { it.views ?: 0 }
+            else -> sortedByKey(catalogue, key)
+        }
         val from = (page - 1) * pageSize
         val items = if (from < all.size) all.subList(from, minOf(from + pageSize, all.size)) else emptyList()
         return newHomePageResponse(request.name, items.mapNotNull { toSearch(it) }, hasNext = from + pageSize < all.size)
@@ -267,14 +314,77 @@ class HanimeProvider : MainAPI() {
                 }
             }
 
+        // Same studio, other series (these open in this provider).
+        val sameBrand = all.filter {
+            item.brand != null && it.brand == item.brand && !it.slug.isNullOrBlank() && baseTitle(it.name ?: "") != title
+        }.distinctBy { baseTitle(it.name ?: "") }.sortedByDescending { it.views ?: 0 }.take(20).mapNotNull { toSearch(it) }
+
+        // Tenrai (MAL) metadata when the show is known there; never blocks the page.
+        val extra = try { tenraiFor(title) } catch (e: Exception) { null }
+
         return newAnimeLoadResponse(title, url, TvType.Anime) {
             posterUrl = item.coverUrl ?: item.posterUrl
             backgroundPosterUrl = item.coverUrl
-            plot = stripHtml(item.description)
+            plot = stripHtml(item.description) ?: extra?.info?.synopsis
             tags = item.tags
-            year = yearOf(item)
+            year = yearOf(item) ?: extra?.info?.year
             addEpisodes(DubStatus.Subbed, episodes)
+            if (extra != null) {
+                actors = extra.cast
+                recommendations = sameBrand + extra.recs
+                extra.info.malId?.let { addMalId(it) }
+                addDuration(extra.info.duration)
+                score = Score.from10(extra.info.score)
+                addTrailer(extra.info.trailer?.url)
+            } else {
+                recommendations = sameBrand
+            }
         }
+    }
+
+    // ---- Tenrai enrichment ----
+
+    private val tenrai = "https://api.tenrai.org/v1"
+    private val tenraiReferer = "https://anikotoapi.site/"
+
+    private class Enrich(val info: MegaPlayProvider.Anime, val cast: List<ActorData>, val recs: List<SearchResponse>)
+
+    /** Looks the title up on Tenrai (exact normalised-title match) for rating, cast, trailer and recommendations. */
+    private suspend fun tenraiFor(title: String): Enrich? {
+        val wanted = normalize(title)
+        if (wanted.isEmpty()) return null
+        val q = java.net.URLEncoder.encode(title, "UTF-8")
+        val found = app.get("$tenrai/anime?q=$q&limit=10", referer = tenraiReferer, timeout = 15)
+            .parsedSafe<MegaPlayProvider.ListResp>()?.data.orEmpty()
+            .firstOrNull { a -> listOfNotNull(a.title, a.titleEnglish).any { normalize(it) == wanted } } ?: return null
+        val malId = found.malId ?: return null
+        val info = app.get("$tenrai/anime/$malId/full", referer = tenraiReferer, timeout = 15)
+            .parsedSafe<MegaPlayProvider.OneResp>()?.data ?: found
+
+        val cast = app.get("$tenrai/anime/$malId/characters", referer = tenraiReferer, timeout = 15)
+            .parsedSafe<MegaPlayProvider.CharResp>()?.data.orEmpty().mapNotNull { c ->
+                val ch = c.character?.name ?: return@mapNotNull null
+                val va = c.voiceActors.orEmpty().let { l ->
+                    l.firstOrNull { it.language == "Japanese" } ?: l.firstOrNull()
+                }?.person
+                ActorData(
+                    Actor(ch, c.character.images?.jpg?.image),
+                    roleString = c.role,
+                    voiceActor = va?.name?.let { Actor(it, va.images?.jpg?.image) },
+                )
+            }.take(40)
+
+        // Tenrai's recommendations are MAL ids, which MegaPlay opens (not this provider).
+        val recs = app.get("$tenrai/anime/$malId/recommendations", referer = tenraiReferer, timeout = 15)
+            .parsedSafe<MegaPlayProvider.RecResp>()?.data.orEmpty().mapNotNull { r ->
+                val e = r.entry ?: return@mapNotNull null
+                val id = e.malId ?: return@mapNotNull null
+                newAnimeSearchResponse(e.title ?: e.titleEnglish ?: "?", "$id", TvType.Anime) {
+                    posterUrl = e.images?.jpg?.large ?: e.images?.jpg?.image
+                    apiName = "MegaPlay"
+                }
+            }.take(20)
+        return Enrich(info, cast, recs)
     }
 
     // ---- Streaming ----
@@ -370,6 +480,11 @@ class HanimeProvider : MainAPI() {
             out.append("\n1. Signature: ${sig.take(16)}… (x-time $time)")
             val hits = fetchHits(force = true)
             out.append("\n2. Catalogue: ${hits.size} videos")
+            // Real tag / brand names, so the home rows can be matched to what the site actually uses.
+            out.append("\n   Top tags: " + hits.flatMap { it.tags.orEmpty() }.groupingBy { it }.eachCount()
+                .entries.sortedByDescending { it.value }.take(15).joinToString(", ") { it.key })
+            out.append("\n   Top brands: " + hits.mapNotNull { it.brand }.groupingBy { it }.eachCount()
+                .entries.sortedByDescending { it.value }.take(10).joinToString(", ") { it.key })
             val slug = hits.firstOrNull { !it.slug.isNullOrBlank() }?.slug
                 ?: throw ErrorLoadingException("No slugs in catalogue")
             val sources = handshake(slug)

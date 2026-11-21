@@ -86,3 +86,14 @@ In the extension settings, **Extra subtitles** can also pull English subtitles f
 | Wyzie | yes, set in settings | MAL id -> IMDb (ARM), season + episode |
 
 Sources that need a key are skipped until you enter one. "Run connection test" reports each source.
+
+## Hanime
+
+A second provider, **Hanime**, is registered next to **MegaPlay** on CloudStream's home screen. It browses
+hanime.tv's catalogue (most viewed / liked / recent, plus tag and studio rows), cached on disk, and enriches
+titles that Tenrai knows with rating, cast, trailer and recommendations. Titles also list other series from
+the same studio.
+
+Inside MegaPlay, Hanime can add its sources to titles it carries. In the extension settings:
+**Hanime sources in MegaPlay** (on/off) and **Preferred source** (MegaPlay first / Hanime first).
+"Test Hanime handshake" also lists the catalogue's most common tags and studios.

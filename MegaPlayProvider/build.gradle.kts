@@ -1,5 +1,5 @@
 // Use an integer for version numbers
-version = 13
+version = 14
 
 cloudstream {
     description = "MegaPlay (sub/dub anime) and Hanime.tv (hentai) providers"

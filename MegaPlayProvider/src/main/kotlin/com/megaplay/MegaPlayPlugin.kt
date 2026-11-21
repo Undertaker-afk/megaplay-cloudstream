@@ -16,6 +16,7 @@ import kotlin.coroutines.startCoroutine
 class MegaPlayPlugin : Plugin() {
     override fun load(context: Context) {
         prefs = context.getSharedPreferences("megaplay", Context.MODE_PRIVATE)
+        cacheDir = context.cacheDir
         registerMainAPI(MegaPlayProvider())
         registerMainAPI(HanimeProvider())
 
@@ -37,6 +38,8 @@ class MegaPlayPlugin : Plugin() {
             "Hanime relay URL: " + (hanimeRelayUrl() ?: "not set (direct)"),
             "Hanime relay secret: " + if (hanimeRelaySecret() != null) "set" else "not set",
             "Test Hanime handshake",
+            "Hanime sources in MegaPlay: " + if (hanimeEnabled()) "On" else "Off",
+            "Preferred source: " + if (hanimeFirst()) "Hanime first" else "MegaPlay first",
         )
         AlertDialog.Builder(ctx)
             .setTitle("MegaPlay settings")
@@ -75,6 +78,8 @@ class MegaPlayPlugin : Plugin() {
                         prefs?.edit()?.putString(KEY_HANIME_SECRET, it.trim())?.apply()
                     }
                     11 -> runHanimeTest(ctx)
+                    12 -> { editor?.putBoolean(KEY_HANIME_ON, !hanimeEnabled())?.apply(); showSettings(ctx) }
+                    13 -> { editor?.putBoolean(KEY_HANIME_FIRST, !hanimeFirst())?.apply(); showSettings(ctx) }
                 }
             }
             .setNegativeButton("Close", null)
@@ -158,6 +163,8 @@ class MegaPlayPlugin : Plugin() {
         private const val KEY_WYZIE = "wyzie_key"
         private const val KEY_HANIME_RELAY = "hanime_relay"
         private const val KEY_HANIME_SECRET = "hanime_relay_secret"
+        private const val KEY_HANIME_ON = "hanime_enabled"
+        private const val KEY_HANIME_FIRST = "hanime_first"
         private val HEIGHTS = listOf(240, 360, 480)
 
         /** Extra subtitle sources: off, only when MegaPlay has no captions, or always. */
@@ -182,6 +189,15 @@ class MegaPlayPlugin : Plugin() {
         fun jimakuKey(): String? = prefs?.getString(KEY_JIMAKU, null)?.trim()?.takeIf { it.isNotEmpty() }
 
         fun wyzieKey(): String? = prefs?.getString(KEY_WYZIE, null)?.trim()?.takeIf { it.isNotEmpty() }
+
+        /** Where the Hanime catalogue is cached on disk (set when the plugin loads). */
+        var cacheDir: java.io.File? = null
+
+        /** Add Hanime links to MegaPlay titles it carries; independent of the adult-title filter. */
+        fun hanimeEnabled(): Boolean = prefs?.getBoolean(KEY_HANIME_ON, true) != false
+
+        /** List Hanime's sources before MegaPlay's. */
+        fun hanimeFirst(): Boolean = prefs?.getBoolean(KEY_HANIME_FIRST, false) == true
 
         /** Optional relay for hanime's signed handshake (Cloudflare workaround). */
         fun hanimeRelayUrl(): String? =

@@ -401,13 +401,18 @@ class MegaPlayProvider : MainAPI() {
         val ep = parts[1]
         var lang = parts[2]
 
+        // Hanime is an alternative source; with "Hanime first" its links are listed before MegaPlay's.
+        val hanimeFirst = MegaPlayPlugin.hanimeFirst()
+        var hanimeOk = false
+        if (hanimeFirst) hanimeOk = addHanimeLinks(malId, ep, callback)
+
         // Fall back to the sub if the dub is missing or fails at any step.
         var stream = resolveStream(malId, ep, lang)
         if (stream == null && lang == "dub") {
             lang = "sub"
             stream = resolveStream(malId, ep, lang)
         }
-        if (stream == null) return addHanimeLinks(malId, ep, callback)
+        if (stream == null) return hanimeOk || (!hanimeFirst && addHanimeLinks(malId, ep, callback))
         val master = stream.master
 
         var captions = stream.tracks.filter { it.kind == "captions" && it.file != null }
@@ -464,8 +469,8 @@ class MegaPlayProvider : MainAPI() {
             // ignore: the regular links above are already delivered
         }
 
-        // Hanime is an alternative source for titles it carries; MegaPlay's links are already out.
-        addHanimeLinks(malId, ep, callback)
+        // Hanime is an alternative source for titles it carries.
+        if (!hanimeFirst) addHanimeLinks(malId, ep, callback)
         return true
     }
 
@@ -473,7 +478,7 @@ class MegaPlayProvider : MainAPI() {
 
     /** Adds Hanime's links when it carries this show (matched by Tenrai's titles). Never throws. */
     private suspend fun addHanimeLinks(malId: String, ep: String, callback: (ExtractorLink) -> Unit): Boolean {
-        if (MegaPlayPlugin.hideAdult()) return false
+        if (!MegaPlayPlugin.hanimeEnabled()) return false
         return try {
             val anime = tryParseJson<OneResp>(app.get("$api/anime/$malId", cacheTime = 60).text)?.data ?: return false
             hanime.addLinksFor(listOfNotNull(anime.title, anime.titleEnglish), ep.toIntOrNull() ?: return false, callback)
