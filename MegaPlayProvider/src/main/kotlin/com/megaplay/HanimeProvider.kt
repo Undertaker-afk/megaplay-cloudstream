@@ -346,6 +346,7 @@ class HanimeProvider : MainAPI() {
 
     private val tenrai = "https://api.tenrai.org/v1"
     private val tenraiReferer = "https://anikotoapi.site/"
+    private val megaPlay by lazy { MegaPlayProvider() }
 
     private class Enrich(val info: MegaPlayProvider.Anime, val cast: List<ActorData>, val recs: List<SearchResponse>)
 
@@ -379,9 +380,9 @@ class HanimeProvider : MainAPI() {
             .parsedSafe<MegaPlayProvider.RecResp>()?.data.orEmpty().mapNotNull { r ->
                 val e = r.entry ?: return@mapNotNull null
                 val id = e.malId ?: return@mapNotNull null
-                newAnimeSearchResponse(e.title ?: e.titleEnglish ?: "?", "$id", TvType.Anime) {
+                // Built through the MegaPlay provider so the entry carries its name and opens there.
+                megaPlay.newAnimeSearchResponse(e.title ?: e.titleEnglish ?: "?", "$id", TvType.Anime) {
                     posterUrl = e.images?.jpg?.large ?: e.images?.jpg?.image
-                    apiName = "MegaPlay"
                 }
             }.take(20)
         return Enrich(info, cast, recs)
