@@ -464,11 +464,28 @@ class HanimeProvider : MainAPI() {
             "$it/api/v11/handshake"
         } ?: "$authApi/api/v11/handshake"
 
-        val response = app.post(url, headers = headers, json = mapOf("token" to token), timeout = 30, cacheTime = 0)
-        if (response.code != 200) return null
+        fun fail(why: String): List<HlsSource>? {
+            MegaPlayPlugin.lastHanimeSlug = slug
+            MegaPlayPlugin.lastHanimeError = "$slug: $why"
+            return null
+        }
+
+        // One retry: the first request after idle time is sometimes answered with a Cloudflare 403.
+        var response = app.post(url, headers = headers, json = mapOf("token" to token), timeout = 30, cacheTime = 0)
+        if (response.code != 200) {
+            Thread.sleep(1500)
+            response = app.post(url, headers = headers, json = mapOf("token" to token), timeout = 30, cacheTime = 0)
+        }
+        if (response.code != 200) {
+            val mitigated = response.headers["cf-mitigated"]?.let { " (cf-mitigated: $it)" } ?: ""
+            return fail("handshake HTTP ${response.code}$mitigated")
+        }
         // OkHttp Headers lookup is case-insensitive.
-        val sealedToken = response.headers["x-token"] ?: return null
-        return tryParseJson<HandshakeData>(open(sealedToken) ?: return null)?.sources
+        val sealedToken = response.headers["x-token"] ?: return fail("HTTP 200 but no x-token header")
+        val opened = open(sealedToken) ?: return fail("could not open the x-token answer")
+        val sources = tryParseJson<HandshakeData>(opened)?.sources ?: return fail("answer has no sources list")
+        MegaPlayPlugin.lastHanimeError = null
+        return sources
     }
 
     override suspend fun loadLinks(
@@ -503,9 +520,17 @@ class HanimeProvider : MainAPI() {
 
     private suspend fun emitLinks(slug: String, callback: (ExtractorLink) -> Unit): Boolean {
         val sources = handshake(slug) ?: return false
+        // Prefer "normal" streams; otherwise take anything playable except the "promotion" (ad) entries.
         val playable = sources.filter { it.kind == "normal" && !it.src.isNullOrBlank() }
+            .ifEmpty { sources.filter { it.kind != "promotion" && !it.src.isNullOrBlank() } }
             .sortedByDescending { it.height ?: 0 }
-        if (playable.isEmpty()) return false
+        if (playable.isEmpty()) {
+            MegaPlayPlugin.lastHanimeSlug = slug
+            MegaPlayPlugin.lastHanimeError = "$slug: ${sources.size} source(s), none playable " +
+                "(kinds: ${sources.map { it.kind ?: "?" }.distinct().joinToString()}; " +
+                "${sources.count { it.src.isNullOrBlank() }} without a URL)"
+            return false
+        }
 
         val headers = mapOf("Referer" to "$origin/", "User-Agent" to ua)
         for (source in playable) {
@@ -536,16 +561,20 @@ class HanimeProvider : MainAPI() {
                 .entries.sortedByDescending { it.value }.take(15).joinToString(", ") { it.key })
             out.append("\n   Top brands: " + hits.mapNotNull { it.brand }.groupingBy { it }.eachCount()
                 .entries.sortedByDescending { it.value }.take(10).joinToString(", ") { it.key })
-            val slug = hits.firstOrNull { !it.slug.isNullOrBlank() }?.slug
+            MegaPlayPlugin.lastHanimeError?.let { out.append("\n   Last failed link lookup: $it") }
+            // Test the episode that last failed to play, if there is one; otherwise the first catalogue entry.
+            val slug = MegaPlayPlugin.lastHanimeSlug?.takeIf { s -> hits.any { it.slug == s } }
+                ?: hits.firstOrNull { !it.slug.isNullOrBlank() }?.slug
                 ?: throw ErrorLoadingException("No slugs in catalogue")
             val sources = handshake(slug)
             out.append("\n3. Handshake for $slug: ")
             if (sources == null) {
-                out.append("FAILED (check the relay settings / Cloudflare)")
+                out.append("FAILED: ${MegaPlayPlugin.lastHanimeError ?: "no details"}")
                 return out.toString()
             }
             val usable = sources.filter { it.kind == "normal" && !it.src.isNullOrBlank() }
-            out.append("${usable.size} playable sources")
+            out.append("${usable.size} playable of ${sources.size} sources (kinds: " +
+                sources.map { it.kind ?: "?" }.distinct().joinToString() + ")")
             usable.take(4).forEach { out.append("\n   ${it.label ?: "${it.height}p"}: ${it.src}") }
         } catch (e: Exception) {
             out.append("\nERROR: ${e.javaClass.simpleName}: ${e.message}")

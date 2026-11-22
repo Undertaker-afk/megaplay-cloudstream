@@ -190,6 +190,10 @@ class MegaPlayPlugin : Plugin() {
 
         fun wyzieKey(): String? = prefs?.getString(KEY_WYZIE, null)?.trim()?.takeIf { it.isNotEmpty() }
 
+        /** Why the last Hanime link lookup failed (shown by "Test Hanime handshake"). */
+        @Volatile var lastHanimeError: String? = null
+        @Volatile var lastHanimeSlug: String? = null
+
         /** Where the Hanime catalogue is cached on disk (set when the plugin loads). */
         var cacheDir: java.io.File? = null
 
