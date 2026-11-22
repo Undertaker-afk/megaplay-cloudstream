@@ -237,6 +237,39 @@ class HanimeProvider : MainAPI() {
         }
     }
 
+    /** Wilson lower bound of the like ratio: a 5/5 title must not outrank a 900/1000 one. */
+    private fun likeScore(h: Hv): Double {
+        val up = (h.likes ?: 0).toDouble()
+        val n = up + (h.dislikes ?: 0)
+        if (n < 20) return 0.0
+        val p = up / n
+        val z = 1.96
+        return (p + z * z / (2 * n) - z * Math.sqrt((p * (1 - p) + z * z / (4 * n)) / n)) / (1 + z * z / n)
+    }
+
+    /**
+     * Home rows built from the catalogue's own numbers; one entry per series (episodes of the
+     * same series share a base title and open as one page).
+     */
+    private fun derivedRow(catalogue: List<Hv>, kind: String): List<Hv> {
+        val now = System.currentTimeMillis() / 1000
+        fun ageDays(h: Hv) = maxOf(1.0, (now - (h.createdAtUnix ?: now)) / 86400.0)
+        val sorted = when (kind) {
+            // Views per day since it was added, damped so a fresh upload does not dominate.
+            "trending" -> catalogue.sortedByDescending { (it.views ?: 0) / (ageDays(it) + 30.0) }
+            "toprated" -> catalogue.filter { likeScore(it) > 0 }.sortedByDescending { likeScore(it) }
+            "week" -> catalogue.filter { ageDays(it) <= 7 }.sortedByDescending { it.createdAtUnix ?: 0 }
+            "gems" -> {
+                val median = catalogue.mapNotNull { it.views }.sorted().let { if (it.isEmpty()) 0L else it[it.size / 2] }
+                catalogue.filter { (it.views ?: 0) < median && likeScore(it) > 0.8 }.sortedByDescending { likeScore(it) }
+            }
+            // Same shuffle all day, so paging through the row stays consistent.
+            "random" -> catalogue.shuffled(java.util.Random(now / 86400))
+            else -> catalogue
+        }
+        return sorted.distinctBy { baseTitle(it.name ?: it.slug ?: "") }
+    }
+
     private fun sortedByKey(hits: List<Hv>, key: String): List<Hv> = when (key) {
         "likes" -> hits.sortedByDescending { it.likes ?: 0 }
         "created_at_unix" -> hits.sortedByDescending { it.createdAtUnix ?: 0 }
@@ -246,6 +279,12 @@ class HanimeProvider : MainAPI() {
     }
 
     override val mainPage = mainPageOf(
+        // Rows computed from the catalogue itself (views, likes, dates); see derivedRow().
+        "d:trending" to "Trending now",
+        "d:toprated" to "Top rated",
+        "d:week" to "New this week",
+        "d:gems" to "Hidden gems",
+        "d:random" to "Surprise me",
         "views" to "Most viewed",
         "likes" to "Most liked",
         "created_at_unix" to "Recently added",
@@ -278,6 +317,7 @@ class HanimeProvider : MainAPI() {
             key.startsWith("brand:") -> key.removePrefix("brand:").let { brand ->
                 catalogue.filter { it.brand?.contains(brand, ignoreCase = true) == true }
             }.sortedByDescending { it.views ?: 0 }
+            key.startsWith("d:") -> derivedRow(catalogue, key.removePrefix("d:"))
             else -> sortedByKey(catalogue, key)
         }
         val from = (page - 1) * pageSize
@@ -314,10 +354,20 @@ class HanimeProvider : MainAPI() {
                 }
             }
 
-        // Same studio, other series (these open in this provider).
-        val sameBrand = all.filter {
-            item.brand != null && it.brand == item.brand && !it.slug.isNullOrBlank() && baseTitle(it.name ?: "") != title
-        }.distinctBy { baseTitle(it.name ?: "") }.sortedByDescending { it.views ?: 0 }.take(20).mapNotNull { toSearch(it) }
+        // Recommended: other series ranked by shared tags, with a bonus for the same studio
+        // (these open in this provider).
+        val myTags = item.tags.orEmpty().map { it.lowercase() }.toSet()
+        val related = all.asSequence()
+            .filter { !it.slug.isNullOrBlank() && baseTitle(it.name ?: "") != title }
+            .map { h ->
+                val shared = h.tags.orEmpty().count { it.lowercase() in myTags }
+                h to (shared + if (item.brand != null && h.brand == item.brand) 3 else 0)
+            }
+            .filter { it.second >= 3 }
+            .sortedWith(compareByDescending<Pair<Hv, Int>> { it.second }.thenByDescending { it.first.views ?: 0 })
+            .map { it.first }
+            .distinctBy { baseTitle(it.name ?: "") }
+            .take(20).mapNotNull { toSearch(it) }.toList()
 
         // Tenrai (MAL) metadata when the show is known there; never blocks the page.
         val extra = try { tenraiFor(title) } catch (e: Exception) { null }
@@ -331,13 +381,13 @@ class HanimeProvider : MainAPI() {
             addEpisodes(DubStatus.Subbed, episodes)
             if (extra != null) {
                 actors = extra.cast
-                recommendations = sameBrand + extra.recs
+                recommendations = related + extra.recs
                 extra.info.malId?.let { addMalId(it) }
                 addDuration(extra.info.duration)
                 score = Score.from10(extra.info.score)
                 addTrailer(extra.info.trailer?.url)
             } else {
-                recommendations = sameBrand
+                recommendations = related
             }
         }
     }
