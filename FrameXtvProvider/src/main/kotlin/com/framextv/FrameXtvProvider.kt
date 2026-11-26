@@ -355,7 +355,7 @@ class FrameXtvProvider : MainAPI() {
             ?.takeIf { it.title != null }
             ?: throw ErrorLoadingException("FrameXTV has no details for movie $id")
         val type = if (isAnimation(d)) TvType.AnimeMovie else TvType.Movie
-        return newMovieLoadResponse(d.title!!, urlOf("movie", id), type, "movie|$id") {
+        return newMovieLoadResponse(d.title!!, urlOf("movie", id), type, "movie|$id|${d.originalLanguage.orEmpty()}") {
             applyDetails(d)
             addTMDbId(id)
         }
@@ -368,6 +368,7 @@ class FrameXtvProvider : MainAPI() {
         val d = getJson<Details>("$mainUrl/api/tv/$id")
             ?.takeIf { it.title != null }
             ?: throw ErrorLoadingException("FrameXTV has no details for series $id")
+        val origLang = d.originalLanguage.orEmpty()
         val seasons = d.seasons.orEmpty().filter {
             (it.seasonNumber ?: it.number) != null && (it.episodeCountTmdb ?: it.episodeCount ?: 0) > 0
         }
@@ -381,7 +382,7 @@ class FrameXtvProvider : MainAPI() {
             if (listed.isEmpty()) {
                 // The season request failed: still offer numbered episodes so playback works.
                 (1..(s.episodeCountTmdb ?: s.episodeCount ?: 0)).map { n ->
-                    newEpisode("tv|$id|$seasonNo|$n") {
+                    newEpisode("tv|$id|$seasonNo|$n|$origLang") {
                         this.name = "Episode $n"
                         this.season = seasonNo
                         this.episode = n
@@ -390,7 +391,7 @@ class FrameXtvProvider : MainAPI() {
             } else {
                 listed.mapNotNull { e ->
                     val n = e.episodeNumber ?: e.number ?: return@mapNotNull null
-                    newEpisode("tv|$id|$seasonNo|$n") {
+                    newEpisode("tv|$id|$seasonNo|$n|$origLang") {
                         this.name = e.name?.takeIf { it.isNotBlank() } ?: "Episode $n"
                         this.season = seasonNo
                         this.episode = n
@@ -498,9 +499,15 @@ class FrameXtvProvider : MainAPI() {
             .amap { alt -> getJson<StreamResponse>("$base&provider=$alt") }
         val responses = listOfNotNull(first) + others.filterNotNull()
 
+        // Collect every server first; the list is then cleaned up before anything is shown.
+        class Candidate(
+            val label: String, val url: String, val isMp4: Boolean,
+            val quality: Int, val headers: Map<String, String>?, val language: String?,
+        )
+
         val seenLinks = HashSet<String>()
         val seenSubs = HashSet<String>()
-        var emitted = 0
+        val candidates = ArrayList<Candidate>()
 
         responses.forEach { res ->
             res.sources.orEmpty().forEach sourceLoop@{ s ->
@@ -511,21 +518,15 @@ class FrameXtvProvider : MainAPI() {
                 val audio = (s.audio ?: res.audio)?.lowercase()
                 if (isAnime && audio == "dub" && !label.contains("dub", ignoreCase = true)) label += " (Dub)"
 
-                // Anime streams need MegaPlay's Referer/Origin; the relay URLs already embed theirs.
-                val headers = (s.headers ?: res.headers)?.takeIf { it.isNotEmpty() }
-                val isMp4 = s.type.equals("mp4", true) || Regex("\\.mp4(\\?|$)").containsMatchIn(url)
-
-                callback(
-                    newExtractorLink(
-                        label, label, url,
-                        if (isMp4) ExtractorLinkType.VIDEO else ExtractorLinkType.M3U8,
-                    ) {
-                        this.referer = headerOf(headers, "Referer") ?: ""
-                        this.quality = qualityOf(s.quality)
-                        if (headers != null) this.headers = headers
-                    }
+                candidates += Candidate(
+                    label = label,
+                    url = url,
+                    isMp4 = s.type.equals("mp4", true) || Regex("\\.mp4(\\?|$)").containsMatchIn(url),
+                    quality = qualityOf(s.quality),
+                    // Anime streams need MegaPlay's Referer/Origin; the relay URLs already embed theirs.
+                    headers = (s.headers ?: res.headers)?.takeIf { it.isNotEmpty() },
+                    language = audioLanguageOf(label),
                 )
-                emitted++
             }
 
             (res.subtitles.orEmpty() + res.sources.orEmpty().flatMap { it.subtitles.orEmpty() }).forEach subLoop@{ sub ->
@@ -536,6 +537,75 @@ class FrameXtvProvider : MainAPI() {
                 subtitleCallback(newSubtitleFile(label, url))
             }
         }
-        return emitted > 0
+
+        var links: List<Candidate> = candidates
+        if (!isAnime) {
+            // Some servers are dubbed into another language (e.g. "Server 3 (Hindi)"): keep English
+            // and the title's own language, and only fall back to the dubs if nothing else exists.
+            val orig = when (p[0]) {
+                "movie" -> p.getOrNull(2)
+                else -> p.getOrNull(4)
+            }?.lowercase()?.takeIf { it.isNotEmpty() }
+            links = links.filter { it.language == null || it.language == "en" || it.language == orig }
+                .ifEmpty { candidates }
+
+            // Some servers only carry a 2-3 minute clip. Compare run times and drop anything under
+            // half of the longest one (a failed probe never removes a link).
+            if (links.size > 1) {
+                val minutes = links.amap { if (it.isMp4) null else playlistMinutes(it.url, it.headers) }
+                val longest = minutes.filterNotNull().maxOrNull() ?: 0.0
+                if (longest >= 10.0) {
+                    links = links.filterIndexed { i, _ -> minutes[i]?.let { it >= longest * 0.5 } ?: true }
+                }
+            }
+        }
+
+        links.forEach { c ->
+            callback(
+                newExtractorLink(
+                    c.label, c.label, c.url,
+                    if (c.isMp4) ExtractorLinkType.VIDEO else ExtractorLinkType.M3U8,
+                ) {
+                    this.referer = headerOf(c.headers, "Referer") ?: ""
+                    this.quality = c.quality
+                    if (c.headers != null) this.headers = c.headers
+                }
+            )
+        }
+        return links.isNotEmpty()
+    }
+
+    // Language names the servers put in their labels, e.g. "Executioner I · Server 3 (Hindi)".
+    private val languageCodes = mapOf(
+        "english" to "en", "hindi" to "hi", "tamil" to "ta", "telugu" to "te", "malayalam" to "ml",
+        "kannada" to "kn", "bengali" to "bn", "punjabi" to "pa", "marathi" to "mr", "urdu" to "ur",
+        "spanish" to "es", "latino" to "es", "french" to "fr", "german" to "de", "italian" to "it",
+        "portuguese" to "pt", "russian" to "ru", "turkish" to "tr", "arabic" to "ar", "japanese" to "ja",
+        "korean" to "ko", "chinese" to "zh", "mandarin" to "zh", "cantonese" to "zh", "thai" to "th",
+        "indonesian" to "id", "vietnamese" to "vi", "polish" to "pl", "dutch" to "nl", "persian" to "fa",
+        "hebrew" to "he", "greek" to "el", "ukrainian" to "uk", "czech" to "cs", "hungarian" to "hu",
+        "romanian" to "ro", "swedish" to "sv",
+    )
+
+    private fun audioLanguageOf(label: String): String? =
+        Regex("\\(([A-Za-z ]+)\\)").findAll(label)
+            .mapNotNull { languageCodes[it.groupValues[1].trim().lowercase()] }
+            .firstOrNull()
+
+    /** Total length of an HLS stream in minutes (follows a master playlist to its first variant). */
+    private suspend fun playlistMinutes(url: String, headers: Map<String, String>?): Double? {
+        try {
+            var text = app.get(url, headers = headers.orEmpty(), timeout = 8).text
+            if (!text.startsWith("#EXTM3U")) return null
+            if (text.contains("#EXT-X-STREAM-INF")) {
+                val variant = text.lines().firstOrNull { it.isNotBlank() && !it.startsWith("#") } ?: return null
+                text = app.get(java.net.URI(url).resolve(variant.trim()).toString(), headers = headers.orEmpty(), timeout = 8).text
+                if (!text.startsWith("#EXTM3U")) return null
+            }
+            val seconds = Regex("#EXTINF:([\\d.]+)").findAll(text).sumOf { it.groupValues[1].toDoubleOrNull() ?: 0.0 }
+            return if (seconds > 0) seconds / 60.0 else null
+        } catch (e: Exception) {
+            return null
+        }
     }
 }

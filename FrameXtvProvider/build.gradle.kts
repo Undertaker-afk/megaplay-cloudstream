@@ -1,5 +1,5 @@
 // Use an integer for version numbers.
-version = 2
+version = 3
 
 cloudstream {
     description = "FrameXTV: movies, TV series and anime with multi-server streams, cast, trailers and subtitles"
