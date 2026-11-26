@@ -1,6 +1,20 @@
 # MegaPlay – CloudStream 3 extension
 
-Two CloudStream 3 providers: **MegaPlay** (mainstream anime) and **Hanime.tv** (adult/hentai).
+CloudStream 3 extensions for **MegaPlay** (mainstream anime), **Hanime.tv** (adult/hentai), and **FrameXTV** (movies, TV and anime).
+
+## FrameXTV
+
+`FrameXtvProvider` is a separate extension registered as **FrameXTV**. It talks to `api.framextv.tech`, which has three parts: `/api/...` (TMDB-backed movies and TV), `/anime/api/...` (AniList/Kitsu-backed anime) and `/api/stream` (playback).
+
+- **Home page**: trending / in theaters / on the air / airing / popular / top rated / new releases, plus genre rows (action, comedy, horror, sci-fi, animation, drama, crime, documentaries). Movie and TV rows only support the `trending`, `popular` and `now_playing` categories on the backend, so the rest use its genre filter.
+- **Search**: movies, TV and anime in one list, with paging.
+- **Title pages**: poster, backdrop and title logo, tagline + synopsis, genres, score, runtime, release year ("coming soon" for unreleased titles), cast with character names, up to five playable trailers, and recommendations (for anime, sequels/prequels first).
+- **TV**: every season is fetched, giving each episode its title, synopsis, still image, air date and score. Japanese animation on TMDB is tagged as Anime.
+- **Anime**: each AniList season is its own entry in the season list; sub and dub episode lists are both offered, with studio and status (airing / finished) on the page.
+- **Playback**: the default provider plus every entry of the response's `alternates` list is requested, so each server (including its relay/proxy mirrors) is its own link, HLS or MP4, with the quality the backend reports. Anime links carry the Referer/Origin the backend asks for. Subtitles from every provider are de-duplicated and offered.
+- **Reliability**: the backend sometimes answers 502 or a bare record; requests are retried and anime details are fetched twice to keep the richer answer.
+
+Build it with a JDK 17 (`JAVA_HOME` pointing at it): `./gradlew :FrameXtvProvider:make`.
 
 - **Metadata** (search, home page, posters, synopsis, episode list): Tenrai API (`api.tenrai.org/v1`, Jikan/MAL clone).
 - **Streaming**: MegaPlay. The provider resolves `megaplay.buzz/stream/mal/{malId}/{ep}/{sub|dub}` to the player file id, calls `/stream/getSourcesNew`, AES-decrypts the `enc` field and returns the raw `master.m3u8`.
