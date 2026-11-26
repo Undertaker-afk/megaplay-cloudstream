@@ -77,16 +77,23 @@ jobs:
       - name: Verify build output
         run: |
           cd $GITHUB_WORKSPACE
-          test -s src/MegaPlayProvider/build/MegaPlayProvider.cs3 || { echo "missing .cs3"; exit 1; }
-          WANT=$(grep -oP '^version = \K[0-9]+' src/MegaPlayProvider/build.gradle.kts)
-          for f in plugins.json plugins-gh.json; do
-            GOT=$(grep -oP '"version": \K[0-9]+' builds/$f | head -1)
-            [ "$GOT" = "$WANT" ] || { echo "$f has version $GOT, expected $WANT"; exit 1; }
-            grep -q "MegaPlayProvider.cs3" builds/$f || { echo "$f has no download url"; exit 1; }
+          # Every module (any directory with a build.gradle.kts) must be built and listed with its own version.
+          for dir in src/*/; do
+            [ -f "$dir/build.gradle.kts" ] || continue
+            mod=$(basename "$dir")
+            test -s "$dir/build/$mod.cs3" || { echo "missing $mod.cs3"; exit 1; }
+            WANT=$(grep -oP '^version = \K[0-9]+' "$dir/build.gradle.kts")
+            for f in plugins.json plugins-gh.json; do
+              GOT=$(jq -r --arg n "$mod" '.[] | select(.internalName == $n) | .version' "builds/$f")
+              [ "$GOT" = "$WANT" ] || { echo "$f has $mod at version '$GOT', expected $WANT"; exit 1; }
+              jq -e --arg n "$mod" '.[] | select(.internalName == $n) | .url | endswith($n + ".cs3")' "builds/$f" > /dev/null \
+                || { echo "$f has no download url for $mod"; exit 1; }
+            done
+            echo "$mod OK (version $WANT)"
           done
           grep -q "raw.githack.com" builds/plugins.json || { echo "plugins.json is not using githack"; exit 1; }
           grep -q "raw.githubusercontent.com" builds/plugins-gh.json || { echo "plugins-gh.json is not using raw.githubusercontent"; exit 1; }
-          echo "build output OK (version $WANT)"
+          echo "build output OK"
 
       - name: Push builds
         run: |
